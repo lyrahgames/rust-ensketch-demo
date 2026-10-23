@@ -2,7 +2,6 @@ use crate::{GpuContext, Result};
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use std::{
-    collections::HashMap,
     io::BufReader,
     sync::{Arc, Mutex, Weak},
 };
@@ -37,7 +36,7 @@ pub struct HostScene(Arc<HostInner>);
 struct HostInner {
     meshes: Vec<Mesh>,
     bounds: Bounds,
-    uploads: Mutex<HashMap<usize, Weak<DeviceInner>>>,
+    uploads: Mutex<Vec<Weak<DeviceInner>>>,
 }
 
 impl HostScene {
@@ -148,7 +147,7 @@ impl HostScene {
                 min: all_min,
                 max: all_max,
             },
-            uploads: Mutex::new(HashMap::new()),
+            uploads: Mutex::new(Vec::new()),
         })))
     }
     pub fn meshes(&self) -> &[Mesh] {
@@ -158,9 +157,11 @@ impl HostScene {
         self.0.bounds
     }
     pub fn upload(&self, context: &GpuContext) -> Result<DeviceScene> {
-        let key = context.identity();
         let mut uploads = self.0.uploads.lock().map_err(|e| e.to_string())?;
-        if let Some(scene) = uploads.get(&key).and_then(Weak::upgrade) {
+        uploads.retain(|entry| entry.strong_count() > 0);
+        if let Some(scene) = uploads.iter().filter_map(Weak::upgrade).find(|scene| {
+            scene.context.instance == context.instance && scene.context.device == context.device
+        }) {
             return Ok(DeviceScene(scene));
         }
         let mut meshes = Vec::new();
@@ -199,7 +200,7 @@ impl HostScene {
             meshes,
             bounds: self.bounds(),
         });
-        uploads.insert(key, Arc::downgrade(&scene));
+        uploads.push(Arc::downgrade(&scene));
         Ok(DeviceScene(scene))
     }
 }
@@ -242,7 +243,7 @@ impl DeviceScene {
         Arc::ptr_eq(&self.0, &other.0)
     }
     pub(crate) fn compatible(&self, context: &GpuContext) -> bool {
-        self.0.context.identity() == context.identity()
+        self.0.context.instance == context.instance && self.0.context.device == context.device
     }
     pub(crate) fn meshes(&self) -> impl Iterator<Item = (&wgpu::Buffer, &wgpu::Buffer, u32)> {
         self.0.meshes.iter().map(|m| (&m.vertex, &m.index, m.count))

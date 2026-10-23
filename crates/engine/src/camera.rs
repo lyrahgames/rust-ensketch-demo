@@ -1,4 +1,4 @@
-use crate::Bounds;
+use crate::{Bounds, InputEvent};
 use glam::{Mat4, Quat, Vec3};
 
 #[derive(Clone, Copy, Debug)]
@@ -23,6 +23,13 @@ impl Default for Camera {
 }
 
 impl Camera {
+    /// Create a camera framed on the supplied scene bounds.
+    pub fn from_bounds(bounds: Bounds) -> Self {
+        let mut camera = Self::default();
+        camera.frame(bounds);
+        camera
+    }
+
     pub fn is_valid(&self) -> bool {
         self.position.is_finite()
             && self.orientation.is_finite()
@@ -58,6 +65,23 @@ impl Camera {
     }
     pub fn zoom(&mut self, amount: f32) {
         self.position += self.orientation * Vec3::NEG_Z * amount;
+    }
+    /// Apply the framework's conventional mouse mapping: left-drag orbits,
+    /// middle/right-drag pans, and the wheel dollies. Applications that need
+    /// different controls can continue to compose `orbit`, `pan`, and `zoom`
+    /// directly in their own callbacks.
+    pub fn apply_pointer_controls(&mut self, event: &InputEvent, pivot: Vec3) {
+        if event.kind == crate::EventKind::MouseMove && event.left_pressed {
+            self.orbit(pivot, event.dx, event.dy);
+        }
+        if event.kind == crate::EventKind::MouseMove
+            && (event.middle_pressed || event.right_pressed)
+        {
+            self.pan(event.dx, event.dy);
+        }
+        if event.kind == crate::EventKind::MouseWheel {
+            self.zoom(event.wheel * 0.2);
+        }
     }
     pub fn reset(&mut self) {
         *self = Self::default();

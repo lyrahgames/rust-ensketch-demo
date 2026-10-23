@@ -1,5 +1,18 @@
 //! Winit host for engine viewers. One event loop owns all native windows.
-use engine::{Camera, EventKind, Executor, GpuContext, HostScene, InputEvent, ObjViewer};
+mod examples;
+mod scripting;
+
+pub use examples::run_case;
+#[cfg(all(feature = "lua", feature = "rhai"))]
+pub use scripting::run_both;
+#[cfg(feature = "lua")]
+pub use scripting::run_lua;
+#[cfg(feature = "rhai")]
+pub use scripting::run_rhai;
+
+use engine::{
+    Camera, EventKind, Executor, InputEvent, ObjViewer, PointerButton, PointerInputState,
+};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -17,50 +30,10 @@ use winit::{
     window::{Window, WindowId},
 };
 
-enum HostEvent {
+pub(crate) enum HostEvent {
     Wake,
     Exit,
 }
-struct ScriptState {
-    default_language: &'static str,
-    #[cfg(feature = "lua")]
-    lua: Option<Rc<script_lua::LuaRuntime>>,
-    #[cfg(feature = "rhai")]
-    rhai: Option<Rc<RefCell<script_rhai::RhaiRuntime>>>,
-}
-impl ScriptState {
-    fn eval(&mut self, language: &str, source: &str) -> String {
-        #[cfg(not(any(feature = "lua", feature = "rhai")))]
-        let _ = source;
-        match language {
-            #[cfg(feature = "lua")]
-            "lua" => self
-                .lua
-                .as_ref()
-                .map(|runtime| {
-                    runtime
-                        .eval(source)
-                        .map(|_| "ok".into())
-                        .unwrap_or_else(|e| e.to_string())
-                })
-                .unwrap_or("Lua is not enabled".into()),
-            #[cfg(feature = "rhai")]
-            "rhai" => self
-                .rhai
-                .as_ref()
-                .map(|runtime| {
-                    runtime
-                        .borrow_mut()
-                        .eval(source)
-                        .map(|v| format!("{v:?}"))
-                        .unwrap_or_else(|e| e.to_string())
-                })
-                .unwrap_or("Rhai is not enabled".into()),
-            _ => "unknown language".into(),
-        }
-    }
-}
-
 pub struct ViewerConfig {
     pub viewer: Rc<RefCell<ObjViewer>>,
     pub camera: Rc<RefCell<Camera>>,
@@ -69,10 +42,20 @@ pub struct ViewerConfig {
 }
 impl ViewerConfig {
     pub fn new(viewer: Rc<RefCell<ObjViewer>>, camera: Rc<RefCell<Camera>>) -> Self {
+        let pivot = viewer
+            .borrow()
+            .scene()
+            .map(|scene| scene.bounds().center())
+            .unwrap_or(glam::Vec3::ZERO);
+        let controlled_camera = camera.clone();
         Self {
             viewer,
             camera,
-            on_input: None,
+            on_input: Some(Box::new(move |event| {
+                controlled_camera
+                    .borrow_mut()
+                    .apply_pointer_controls(&event, pivot);
+            })),
             on_frame: None,
         }
     }
@@ -80,16 +63,15 @@ impl ViewerConfig {
 struct LiveViewer {
     window: Arc<Window>,
     config: ViewerConfig,
-    last_cursor: Option<(f32, f32)>,
-    buttons: [bool; 3],
+    pointer: PointerInputState,
     last_frame: Instant,
 }
 pub struct NativeApp {
     pending: Vec<ViewerConfig>,
     live: HashMap<WindowId, LiveViewer>,
     error: Option<String>,
-    script_state: Option<ScriptState>,
-    main_executor: Option<Executor<ScriptState>>,
+    pub(crate) script_state: Option<scripting::ScriptState>,
+    main_executor: Option<Executor<scripting::ScriptState>>,
     next_frame: Instant,
 }
 /// Optional manual event pumping for embedding the native host in another
@@ -129,58 +111,19 @@ impl NativeApp {
     pub fn add_viewer(&mut self, config: ViewerConfig) {
         self.pending.push(config);
     }
+    /// Add a viewer with the standard orbit/pan/dolly controls and render loop.
+    pub fn add_obj_viewer(&mut self, viewer: ObjViewer, camera: Camera) {
+        self.add_viewer(ViewerConfig::new(
+            Rc::new(RefCell::new(viewer)),
+            Rc::new(RefCell::new(camera)),
+        ));
+    }
     pub fn start(mut self) -> Result<NativeSession, String> {
         let event_loop = EventLoop::<HostEvent>::with_user_event()
             .build()
             .map_err(|e| e.to_string())?;
         if let Some(state) = self.script_state.take() {
-            let default_language = state.default_language.to_owned();
-            let proxy = event_loop.create_proxy();
-            let wake = proxy.clone();
-            let executor = Executor::new_main(state).with_wakeup(move || {
-                let _ = wake.send_event(HostEvent::Wake);
-            });
-            let submitter = executor.submitter();
-            std::thread::spawn(move || {
-                use std::io::BufRead;
-                let stdin = std::io::stdin();
-                let mut language = default_language;
-                for line in stdin.lock().lines() {
-                    let Ok(line) = line else {
-                        break;
-                    };
-                    let source = line.trim();
-                    if source == ":quit" {
-                        let _ = proxy.send_event(HostEvent::Exit);
-                        break;
-                    }
-                    if source == ":lua" || source == ":rhai" {
-                        language = source[1..].into();
-                        println!("{language}");
-                        continue;
-                    }
-                    if source == ":main" {
-                        println!("main executor");
-                        continue;
-                    }
-                    if source.is_empty() {
-                        continue;
-                    }
-                    let language = language.clone();
-                    let source = source.to_owned();
-                    match submitter.call(move |state| state.eval(&language, &source)) {
-                        Ok(task) => match pollster::block_on(task) {
-                            Ok(output) => println!("{output}"),
-                            Err(error) => eprintln!("task failed: {error:?}"),
-                        },
-                        Err(error) => {
-                            eprintln!("executor closed: {error:?}");
-                            break;
-                        }
-                    }
-                }
-            });
-            self.main_executor = Some(executor);
+            self.main_executor = Some(scripting::start_repl(state, event_loop.create_proxy()));
         }
         Ok(NativeSession {
             event_loop,
@@ -189,6 +132,13 @@ impl NativeApp {
     }
     pub fn show(self) -> Result<(), String> {
         self.start()?.run()
+    }
+    /// Run one viewer with standard controls, without manually assembling an
+    /// application or callback configuration.
+    pub fn show_obj_viewer(viewer: ObjViewer, camera: Camera) -> Result<(), String> {
+        let mut app = Self::new();
+        app.add_obj_viewer(viewer, camera);
+        app.show()
     }
 }
 impl Default for NativeApp {
@@ -236,8 +186,7 @@ impl ApplicationHandler<HostEvent> for NativeApp {
                 Ok(LiveViewer {
                     window,
                     config,
-                    last_cursor: None,
-                    buttons: [false; 3],
+                    pointer: PointerInputState::default(),
                     last_frame: Instant::now(),
                 })
             })();
@@ -290,27 +239,16 @@ impl ApplicationHandler<HostEvent> for NativeApp {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                let index = match button {
-                    MouseButton::Left => Some(0),
-                    MouseButton::Middle => Some(1),
-                    MouseButton::Right => Some(2),
+                let button = match button {
+                    MouseButton::Left => Some(PointerButton::Left),
+                    MouseButton::Middle => Some(PointerButton::Middle),
+                    MouseButton::Right => Some(PointerButton::Right),
                     _ => None,
                 };
-                if let Some(index) = index {
-                    live.buttons[index] = state == ElementState::Pressed;
-                    let (x, y) = live.last_cursor.unwrap_or((0.0, 0.0));
+                if let Some(button) = button {
+                    let event = live.pointer.button(button, state == ElementState::Pressed);
                     if let Some(callback) = &mut live.config.on_input {
-                        callback(InputEvent {
-                            kind: EventKind::MouseButton,
-                            x,
-                            y,
-                            button: Some(index as u8),
-                            pressed: live.buttons[index],
-                            left_pressed: live.buttons[0],
-                            middle_pressed: live.buttons[1],
-                            right_pressed: live.buttons[2],
-                            ..Default::default()
-                        });
+                        callback(event);
                     }
                 }
             }
@@ -328,41 +266,19 @@ impl ApplicationHandler<HostEvent> for NativeApp {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let point = (position.x as f32, position.y as f32);
-                if let Some(last) = live.last_cursor
+                if let Some(event) = live.pointer.cursor(position.x as f32, position.y as f32)
                     && let Some(callback) = &mut live.config.on_input
                 {
-                    callback(InputEvent {
-                        kind: EventKind::MouseMove,
-                        dx: point.0 - last.0,
-                        dy: point.1 - last.1,
-                        x: point.0,
-                        y: point.1,
-                        left_pressed: live.buttons[0],
-                        middle_pressed: live.buttons[1],
-                        right_pressed: live.buttons[2],
-                        ..Default::default()
-                    });
+                    callback(event);
                 }
-                live.last_cursor = Some(point);
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let wheel = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
                 };
-                let (x, y) = live.last_cursor.unwrap_or((0.0, 0.0));
                 if let Some(callback) = &mut live.config.on_input {
-                    callback(InputEvent {
-                        kind: EventKind::MouseWheel,
-                        wheel,
-                        x,
-                        y,
-                        left_pressed: live.buttons[0],
-                        middle_pressed: live.buttons[1],
-                        right_pressed: live.buttons[2],
-                        ..Default::default()
-                    });
+                    callback(live.pointer.wheel(wheel));
                 }
             }
             WindowEvent::RedrawRequested => {
@@ -435,185 +351,4 @@ impl ApplicationHandler<HostEvent> for NativeApp {
             live.window.request_redraw();
         }
     }
-}
-
-/// Run one of the four Rust parity demonstrations.
-pub fn run_case(case: usize) -> Result<(), String> {
-    if !(1..=4).contains(&case) {
-        return Err("case must be 1..=4".into());
-    }
-    let context = pollster::block_on(GpuContext::new())?;
-    let first = HostScene::load_obj(include_bytes!("../../../assets/models/pyramid.obj"))?;
-    let second = HostScene::load_obj(include_bytes!("../../../assets/models/cube.obj"))?;
-    let shared_device = (case == 4).then(|| first.upload(&context)).transpose()?;
-    let shared_camera = Rc::new(RefCell::new(Camera::default()));
-    shared_camera.borrow_mut().frame(first.bounds());
-    let mut app = NativeApp::new();
-    let count = if case == 1 { 1 } else { 2 };
-    for i in 0..count {
-        let mut viewer = ObjViewer::new(context.clone());
-        match case {
-            2 if i == 1 => viewer.set_host_scene(&second)?,
-            4 => viewer.set_device_scene(shared_device.as_ref().unwrap().clone())?,
-            _ => viewer.set_host_scene(&first)?,
-        }
-        let camera = if case == 4 || i == 0 {
-            shared_camera.clone()
-        } else {
-            let c = Rc::new(RefCell::new(Camera::default()));
-            c.borrow_mut().frame(if case == 2 {
-                second.bounds()
-            } else {
-                first.bounds()
-            });
-            c
-        };
-        viewer.set_title(format!("Rust case {case} — viewer {}", i + 1));
-        viewer.resize(
-            if case == 4 && i == 1 { 900 } else { 640 },
-            if case == 4 && i == 1 { 400 } else { 480 },
-        );
-        viewer.set_background_color(if i == 0 {
-            [0.08, 0.09, 0.12, 1.0]
-        } else {
-            [0.17, 0.08, 0.12, 1.0]
-        });
-        let mut config = ViewerConfig::new(Rc::new(RefCell::new(viewer)), camera.clone());
-        config.on_input = Some(Box::new(move |event| {
-            let mut camera = camera.borrow_mut();
-            if event.left_pressed {
-                camera.orbit(glam::Vec3::ZERO, event.dx, event.dy);
-            }
-            if event.middle_pressed || event.right_pressed {
-                camera.pan(event.dx, event.dy);
-            }
-            if event.wheel != 0.0 {
-                camera.zoom(event.wheel * 0.2);
-            }
-        }));
-        app.add_viewer(config);
-    }
-    app.show()
-}
-
-#[cfg(feature = "lua")]
-pub fn run_lua(path: &str) -> Result<(), String> {
-    use script_lua::LuaRuntime;
-    let runtime = Rc::new(LuaRuntime::new().map_err(|e| e.to_string())?);
-    runtime
-        .eval(&std::fs::read_to_string(path).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    let mut app = NativeApp::new();
-    app.script_state = Some(ScriptState {
-        default_language: "lua",
-        lua: Some(runtime.clone()),
-        #[cfg(feature = "rhai")]
-        rhai: None,
-    });
-    for scripted in runtime.viewers() {
-        let mut config = ViewerConfig::new(
-            scripted.viewer.clone(),
-            Rc::new(RefCell::new(Camera::default())),
-        );
-        let viewer = scripted.clone();
-        let runtime_ref = runtime.clone();
-        config.on_input = Some(Box::new(move |event| {
-            if let Err(error) = viewer.dispatch_input(runtime_ref.lua(), event) {
-                eprintln!("Lua callback: {error}");
-            }
-        }));
-        let viewer = scripted.clone();
-        config.on_frame = Some(Box::new(move |dt| {
-            if let Err(error) = viewer.dispatch_frame(dt) {
-                eprintln!("Lua frame: {error}");
-            }
-        }));
-        app.add_viewer(config);
-    }
-    app.show()
-}
-
-#[cfg(feature = "rhai")]
-pub fn run_rhai(path: &str) -> Result<(), String> {
-    use script_rhai::RhaiRuntime;
-    let runtime = Rc::new(RefCell::new(RhaiRuntime::new()));
-    let _ = runtime
-        .borrow_mut()
-        .eval(&std::fs::read_to_string(path).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    let mut app = NativeApp::new();
-    app.script_state = Some(ScriptState {
-        default_language: "rhai",
-        #[cfg(feature = "lua")]
-        lua: None,
-        rhai: Some(runtime.clone()),
-    });
-    for scripted in runtime.borrow().viewers() {
-        let mut config = ViewerConfig::new(
-            scripted.viewer.clone(),
-            Rc::new(RefCell::new(Camera::default())),
-        );
-        let viewer = scripted.clone();
-        let runtime_ref = runtime.clone();
-        config.on_input = Some(Box::new(move |event| {
-            let runtime = runtime_ref.borrow();
-            if let Err(error) = viewer.dispatch_input(runtime.engine(), runtime.ast(), event) {
-                eprintln!("Rhai callback: {error}");
-            }
-        }));
-        let viewer = scripted.clone();
-        let runtime_ref = runtime.clone();
-        config.on_frame = Some(Box::new(move |dt| {
-            let runtime = runtime_ref.borrow();
-            if let Err(error) = viewer.dispatch_frame(runtime.engine(), runtime.ast(), dt) {
-                eprintln!("Rhai frame: {error}");
-            }
-        }));
-        app.add_viewer(config);
-    }
-    app.show()
-}
-
-/// Run Lua-owned windows with the first viewer explicitly shared into Rhai.
-#[cfg(all(feature = "lua", feature = "rhai"))]
-pub fn run_both(lua_path: &str, rhai_path: &str) -> Result<(), String> {
-    let lua = Rc::new(script_lua::LuaRuntime::new().map_err(|e| e.to_string())?);
-    lua.eval(&std::fs::read_to_string(lua_path).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    let scripted_viewers = lua.viewers();
-    let mut rhai_runtime = script_rhai::RhaiRuntime::new();
-    if let Some(first) = scripted_viewers.first() {
-        rhai_runtime.expose_viewer("viewer", first.viewer.clone());
-    }
-    let _ = rhai_runtime
-        .eval(&std::fs::read_to_string(rhai_path).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    let rhai = Rc::new(RefCell::new(rhai_runtime));
-    let mut app = NativeApp::new();
-    app.script_state = Some(ScriptState {
-        default_language: "lua",
-        lua: Some(lua.clone()),
-        rhai: Some(rhai),
-    });
-    for scripted in scripted_viewers {
-        let mut config = ViewerConfig::new(
-            scripted.viewer.clone(),
-            Rc::new(RefCell::new(Camera::default())),
-        );
-        let viewer = scripted.clone();
-        let runtime = lua.clone();
-        config.on_input = Some(Box::new(move |event| {
-            if let Err(error) = viewer.dispatch_input(runtime.lua(), event) {
-                eprintln!("Lua callback: {error}");
-            }
-        }));
-        let viewer = scripted.clone();
-        config.on_frame = Some(Box::new(move |dt| {
-            if let Err(error) = viewer.dispatch_frame(dt) {
-                eprintln!("Lua frame: {error}");
-            }
-        }));
-        app.add_viewer(config);
-    }
-    app.show()
 }

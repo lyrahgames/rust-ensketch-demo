@@ -6,12 +6,14 @@
 mod camera;
 mod executor;
 mod gpu;
+mod input;
 mod scene;
 mod viewer;
 
 pub use camera::Camera;
 pub use executor::{Executor, ExecutorError, Submitter, Task};
 pub use gpu::GpuContext;
+pub use input::{PointerButton, PointerInputState};
 pub use scene::{Bounds, DeviceScene, HostScene, Mesh};
 pub use viewer::ObjViewer;
 

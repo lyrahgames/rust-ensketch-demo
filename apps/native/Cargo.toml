@@ -8,6 +8,10 @@ winit.workspace = true
 pollster.workspace = true
 wgpu.workspace = true
 glam.workspace = true
+
+[[example]]
+name = "minimal"
+path = "../../examples/rust/minimal.rs"
 [features]
 lua = ["dep:script-lua"]
 rhai = ["dep:script-rhai"]

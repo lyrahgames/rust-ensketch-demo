@@ -1,10 +1,7 @@
 use crate::Result;
-use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct GpuContext(pub(crate) Arc<Inner>);
-
-pub(crate) struct Inner {
+pub struct GpuContext {
     pub instance: wgpu::Instance,
     pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
@@ -48,32 +45,29 @@ impl GpuContext {
             .request_device(&wgpu::DeviceDescriptor::default())
             .await
             .map_err(|e| e.to_string())?;
-        Ok(Self(Arc::new(Inner {
+        Ok(Self {
             instance,
             adapter,
             device,
             queue,
-        })))
+        })
     }
     pub fn adapter_info(&self) -> wgpu::AdapterInfo {
-        self.0.adapter.get_info()
+        self.adapter.get_info()
     }
     pub fn limits(&self) -> wgpu::Limits {
-        self.0.device.limits()
+        self.device.limits()
     }
     pub fn features(&self) -> wgpu::Features {
-        self.0.device.features()
+        self.device.features()
     }
     pub fn device(&self) -> &wgpu::Device {
-        &self.0.device
+        &self.device
     }
     pub fn queue(&self) -> &wgpu::Queue {
-        &self.0.queue
+        &self.queue
     }
     pub fn instance(&self) -> &wgpu::Instance {
-        &self.0.instance
-    }
-    pub(crate) fn identity(&self) -> usize {
-        Arc::as_ptr(&self.0) as usize
+        &self.instance
     }
 }

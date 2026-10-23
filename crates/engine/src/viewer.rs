@@ -54,7 +54,7 @@ impl ObjViewer {
         }
         let context = &self.context;
         let config = surface
-            .get_default_config(&context.0.adapter, width.max(1), height.max(1))
+            .get_default_config(&context.adapter, width.max(1), height.max(1))
             .ok_or("surface is incompatible with the selected GPU adapter")?;
         surface.configure(context.device(), &config);
         let depth = Self::create_depth(context, &config);

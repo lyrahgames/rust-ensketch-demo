@@ -24,11 +24,17 @@ Native callback registrations support mouse motion/buttons/wheel, keys, resize, 
 Run from this directory. Each command opens windows and blocks until they close. Left drag orbits, middle/right drag pans, and the wheel zooms. Case 4 uses one device scene and camera at two viewport sizes.
 
 ```sh
+cargo run -p native --example minimal
 cargo run -p native --example rust-case-1
 cargo run -p native --example rust-case-2
 cargo run -p native --example rust-case-3
 cargo run -p native --example rust-case-4
 ```
+
+The minimal Rust app is in `examples/rust/minimal.rs`: it loads an OBJ, creates
+an engine viewer and a bounds-framed camera, then calls the native host's
+`show_obj_viewer`. Standard orbit, pan, and dolly controls are installed by
+default; applications can replace them with their own callbacks.
 
 Lua and Rhai are optional; the standalone native executable has no Python dependency.
 
