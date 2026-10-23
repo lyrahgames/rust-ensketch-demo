@@ -1,4 +1,4 @@
-let context = GpuContext();
+let context = DeviceContext();
 let scene = Scene("assets/models/pyramid.obj");
 let device_mesh = DeviceTriangleMesh(context, scene, 0);
 let camera = Camera(); camera.frame(scene);

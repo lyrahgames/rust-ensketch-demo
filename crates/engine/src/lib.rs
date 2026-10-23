@@ -5,9 +5,8 @@
 #![cfg_attr(target_arch = "wasm32", allow(clippy::arc_with_non_send_sync))]
 mod aabb;
 mod camera;
-mod device_mesh;
+mod device;
 mod executor;
-mod gpu;
 mod input;
 mod scene;
 mod vector_like;
@@ -15,9 +14,8 @@ mod viewer;
 
 pub use aabb::Aabb;
 pub use camera::Camera;
-pub use device_mesh::{DeviceTriangleMesh, GpuBuffer};
+pub use device::{DeviceContext, DeviceFromHost, DeviceTriangleMesh, DeviceVec};
 pub use executor::{Executor, ExecutorError, Submitter, Task};
-pub use gpu::GpuContext;
 pub use input::{PointerButton, PointerInputState};
 pub use scene::{
   Scene, Triangle, TriangleMesh, TriangleTopology, Vertex, VertexGeometry, VertexIndex,

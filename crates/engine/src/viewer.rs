@@ -1,4 +1,4 @@
-use crate::{Camera, DeviceTriangleMesh, GpuContext, Result, Triangle, Vertex};
+use crate::{Camera, DeviceContext, DeviceTriangleMesh, Result, Triangle, Vertex};
 use bytemuck::{Pod, Zeroable};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -20,7 +20,7 @@ struct SurfaceState {
 /// Script-owned OBJ renderer. A platform host attaches its window or canvas
 /// surface when that platform allows it. No camera or callbacks are retained.
 pub struct ObjViewer {
-  context: GpuContext,
+  context: DeviceContext,
   surface: Option<SurfaceState>,
   meshes:  Vec<Arc<DeviceTriangleMesh<Vertex, Triangle>>>,
 }
@@ -34,7 +34,7 @@ pub enum RenderStatus {
 }
 
 impl ObjViewer {
-  pub fn new(context: GpuContext) -> Self {
+  pub fn new(context: DeviceContext) -> Self {
     Self {
       context,
       surface: None,
@@ -148,7 +148,10 @@ impl ObjViewer {
     });
     Ok(())
   }
-  fn create_depth(context: &GpuContext, config: &wgpu::SurfaceConfiguration) -> wgpu::TextureView {
+  fn create_depth(
+    context: &DeviceContext,
+    config: &wgpu::SurfaceConfiguration,
+  ) -> wgpu::TextureView {
     context
       .device()
       .create_texture(&wgpu::TextureDescriptor {
@@ -167,7 +170,7 @@ impl ObjViewer {
       })
       .create_view(&Default::default())
   }
-  pub fn context(&self) -> &GpuContext { &self.context }
+  pub fn context(&self) -> &DeviceContext { &self.context }
   pub fn resize(&mut self, width: u32, height: u32) -> Result<()> {
     if width == 0 || height == 0 {
       return Ok(());

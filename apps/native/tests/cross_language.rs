@@ -2,7 +2,7 @@
 #[test]
 fn lua_and_rhai_bind_the_same_engine_viewer() {
   use std::{cell::RefCell, rc::Rc};
-  let Ok(context) = pollster::block_on(engine::GpuContext::new()) else {
+  let Ok(context) = pollster::block_on(engine::DeviceContext::new()) else {
     return;
   };
   let viewer = Rc::new(RefCell::new(engine::ObjViewer::new(context)));

@@ -1,8 +1,8 @@
 //! Persistent Lua bindings for script-owned engine objects.
 #![recursion_limit = "1024"]
 use engine::{
-  Aabb, Camera, DeviceTriangleMesh, EventKind, GpuContext, InputEvent, ObjViewer, Scene, Triangle,
-  Vertex,
+  Aabb, Camera, DeviceContext, DeviceTriangleMesh, EventKind, InputEvent, ObjViewer, Scene,
+  Triangle, Vertex,
 };
 use glam::{Quat, Vec3};
 use mlua::{AnyUserData, Function, Lua, Result, Table, UserData, UserDataFields, UserDataMethods};
@@ -15,7 +15,7 @@ use std::{
 fn err(message: String) -> mlua::Error { mlua::Error::RuntimeError(message) }
 
 #[derive(Clone)]
-pub struct LuaContext(pub GpuContext);
+pub struct LuaContext(pub DeviceContext);
 impl UserData for LuaContext {
   fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
     fields.add_field_method_get("adapter_name", |_, this| Ok(this.0.adapter_info().name));
@@ -188,7 +188,7 @@ impl UserData for LuaViewer {
           .0
           .meshes()
           .iter()
-          .map(|mesh| DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new))
+          .map(|mesh| context.upload(mesh).map(Arc::new))
           .collect::<std::result::Result<Vec<_>, _>>()
           .map_err(err)?;
         this.viewer.borrow_mut().set_device_meshes(meshes);
@@ -294,11 +294,11 @@ impl LuaRuntime {
       "new",
       lua.create_function(|_, adapter: Option<String>| {
         Ok(LuaContext(
-          pollster::block_on(GpuContext::with_adapter(adapter.as_deref())).map_err(err)?,
+          pollster::block_on(DeviceContext::with_adapter(adapter.as_deref())).map_err(err)?,
         ))
       })?,
     )?;
-    globals.set("GpuContext", context_class)?;
+    globals.set("DeviceContext", context_class)?;
     let scene_class = lua.create_table()?;
     scene_class.set(
       "load_obj",
@@ -324,7 +324,7 @@ impl LuaRuntime {
             .get(index)
             .ok_or_else(|| err("triangle mesh index is out of range".into()))?;
           Ok(LuaDeviceTriangleMesh(Arc::new(
-            DeviceTriangleMesh::from_triangle_mesh(&context.0, mesh).map_err(err)?,
+            context.0.upload(mesh).map_err(err)?,
           )))
         },
       )?,
@@ -384,7 +384,7 @@ impl LuaRuntime {
   pub fn expose_camera(&self, name: &str, camera: Rc<RefCell<Camera>>) -> Result<()> {
     self.lua.globals().set(name, LuaCamera(camera))
   }
-  pub fn expose_context(&self, name: &str, context: GpuContext) -> Result<()> {
+  pub fn expose_context(&self, name: &str, context: DeviceContext) -> Result<()> {
     self.lua.globals().set(name, LuaContext(context))
   }
   pub fn expose_scene(&self, name: &str, scene: Scene) -> Result<()> {
@@ -421,11 +421,11 @@ mod tests {
   }
   #[test]
   fn callback_replacement() {
-    if pollster::block_on(GpuContext::new()).is_err() {
+    if pollster::block_on(DeviceContext::new()).is_err() {
       return;
     }
     let runtime = LuaRuntime::new().unwrap();
-    runtime.eval("context = GpuContext.new(); viewer = ObjViewer.new(context); hits = 0; viewer:on_mouse_move(function(e) hits = hits + 1 end)").unwrap();
+    runtime.eval("context = DeviceContext.new(); viewer = ObjViewer.new(context); hits = 0; viewer:on_mouse_move(function(e) hits = hits + 1 end)").unwrap();
     let viewer = runtime.viewers().pop().unwrap();
     viewer
       .dispatch_input(

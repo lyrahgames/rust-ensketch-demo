@@ -1,6 +1,6 @@
 //! One winit loop, one main-thread viewer, and one worker-owned viewer.
 #![recursion_limit = "512"]
-use engine::{Aabb, Camera, Executor, GpuContext, ObjViewer, RenderStatus, Scene};
+use engine::{Aabb, Camera, DeviceContext, Executor, ObjViewer, RenderStatus, Scene};
 use script_lua::LuaRuntime;
 use script_rhai::RhaiRuntime;
 use std::{
@@ -85,7 +85,7 @@ impl WorkerState {
 }
 
 struct ThreadedApp {
-  context:       GpuContext,
+  context:       DeviceContext,
   scene:         Scene,
   camera:        Rc<RefCell<Camera>>,
   main_window:   Option<Arc<Window>>,
@@ -158,7 +158,7 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
       .scene
       .meshes()
       .iter()
-      .map(|mesh| engine::DeviceTriangleMesh::from_triangle_mesh(&self.context, mesh).map(Arc::new))
+      .map(|mesh| self.context.upload(mesh).map(Arc::new))
       .collect::<engine::Result<Vec<_>>>()
       .unwrap();
     main_viewer.set_device_meshes(meshes);
@@ -194,7 +194,7 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
       let meshes = scene
         .meshes()
         .iter()
-        .map(|mesh| engine::DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new))
+        .map(|mesh| context.upload(mesh).map(Arc::new))
         .collect::<engine::Result<Vec<_>>>()
         .unwrap();
       viewer.set_device_meshes(meshes);
@@ -421,7 +421,7 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
 }
 
 fn main() {
-  let context = pollster::block_on(GpuContext::new()).unwrap();
+  let context = pollster::block_on(DeviceContext::new()).unwrap();
   let scene = Scene::load_obj(include_bytes!("../../../assets/models/pyramid.obj")).unwrap();
   let mut camera = Camera::default();
   camera.frame_aabb(Aabb::from(&scene));

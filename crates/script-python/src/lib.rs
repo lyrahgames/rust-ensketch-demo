@@ -1,8 +1,8 @@
 //! Importable Python host. Python owns all wrapper objects and callbacks.
 #![recursion_limit = "1024"]
 use engine::{
-  Aabb, Camera, DeviceTriangleMesh, EventKind, GpuContext, InputEvent, ObjViewer, Scene, Triangle,
-  Vertex,
+  Aabb, Camera, DeviceContext, DeviceTriangleMesh, EventKind, InputEvent, ObjViewer, Scene,
+  Triangle, Vertex,
 };
 use glam::{Quat, Vec3};
 use native::{NativeApp, NativeSession, ViewerConfig};
@@ -19,17 +19,17 @@ use std::{
 
 fn error(message: String) -> PyErr { PyRuntimeError::new_err(message) }
 
-#[pyclass(name = "GpuContext", unsendable)]
-struct PyGpuContext {
-  inner: GpuContext,
+#[pyclass(name = "DeviceContext", unsendable)]
+struct PyDeviceContext {
+  inner: DeviceContext,
 }
 #[pymethods]
-impl PyGpuContext {
+impl PyDeviceContext {
   #[new]
   #[pyo3(signature = (adapter=None))]
   fn new(adapter: Option<&str>) -> PyResult<Self> {
     Ok(Self {
-      inner: pollster::block_on(GpuContext::with_adapter(adapter)).map_err(error)?,
+      inner: pollster::block_on(DeviceContext::with_adapter(adapter)).map_err(error)?,
     })
   }
   #[getter]
@@ -69,7 +69,7 @@ struct PyDeviceTriangleMesh {
 impl PyDeviceTriangleMesh {
   #[staticmethod]
   fn from_scene(
-    context: PyRef<'_, PyGpuContext>,
+    context: PyRef<'_, PyDeviceContext>,
     scene: PyRef<'_, PyScene>,
     mesh_index: usize,
   ) -> PyResult<Self> {
@@ -79,7 +79,7 @@ impl PyDeviceTriangleMesh {
       .get(mesh_index)
       .ok_or_else(|| PyValueError::new_err("triangle mesh index is out of range"))?;
     Ok(Self {
-      inner: Arc::new(DeviceTriangleMesh::from_triangle_mesh(&context.inner, mesh).map_err(error)?),
+      inner: Arc::new(context.inner.upload(mesh).map_err(error)?),
     })
   }
 }
@@ -220,7 +220,7 @@ struct PyObjViewer {
 #[pymethods]
 impl PyObjViewer {
   #[new]
-  fn new(context: PyRef<'_, PyGpuContext>) -> Self {
+  fn new(context: PyRef<'_, PyDeviceContext>) -> Self {
     let registration = Rc::new(Registration {
       viewer: Rc::new(RefCell::new(ObjViewer::new(context.inner.clone()))),
       camera: Rc::new(RefCell::new(Camera::default())),
@@ -249,7 +249,7 @@ impl PyObjViewer {
         .inner
         .meshes()
         .iter()
-        .map(|mesh| DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new))
+        .map(|mesh| context.upload(mesh).map(Arc::new))
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(error)?;
       self
@@ -517,7 +517,7 @@ fn process_events(py: Python<'_>, timeout_ms: u64) -> PyResult<bool> {
 
 #[pymodule]
 fn graphics(module: &Bound<'_, PyModule>) -> PyResult<()> {
-  module.add_class::<PyGpuContext>()?;
+  module.add_class::<PyDeviceContext>()?;
   module.add_class::<PyScene>()?;
   module.add_class::<PyDeviceTriangleMesh>()?;
   module.add_class::<PyCamera>()?;

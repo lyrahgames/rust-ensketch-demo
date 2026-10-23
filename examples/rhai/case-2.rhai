@@ -1,4 +1,4 @@
-let context = GpuContext();
+let context = DeviceContext();
 let scene_a = Scene("assets/models/pyramid.obj");
 let scene_b = Scene("assets/models/cube.obj");
 let camera_a = Camera(); camera_a.frame(scene_a);

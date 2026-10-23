@@ -1,4 +1,4 @@
-import init, { GpuContext, Scene, DeviceTriangleMesh, Camera, ObjViewer } from '../../pkg/script_js.js';
+import init, { DeviceContext, Scene, DeviceTriangleMesh, Camera, ObjViewer } from '../../pkg/script_js.js';
 
 export function pointerEvent(event, dx = 0, dy = 0) {
   return {
@@ -31,7 +31,7 @@ export function closeRequestEvent() {
 
 export async function run(caseNumber) {
   await init();
-  const context = await GpuContext.create();
+  const context = await DeviceContext.create();
   const pyramid = await Scene.loadObjUrl(new URL('../../assets/models/pyramid.obj', import.meta.url).href);
   const cube = caseNumber === 2
     ? await Scene.loadObjUrl(new URL('../../assets/models/cube.obj', import.meta.url).href)

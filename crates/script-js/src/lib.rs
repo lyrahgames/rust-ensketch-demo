@@ -1,6 +1,6 @@
 //! Browser WebGPU bindings. JavaScript owns callbacks and animation frames.
 #![cfg(target_arch = "wasm32")]
-use engine::{Aabb, Camera, DeviceTriangleMesh, GpuContext, ObjViewer, Scene, Triangle, Vertex};
+use engine::{Aabb, Camera, DeviceContext, DeviceTriangleMesh, ObjViewer, Scene, Triangle, Vertex};
 use glam::Vec3;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
@@ -10,16 +10,16 @@ use web_sys::{HtmlCanvasElement, Request, Response};
 
 fn error(message: String) -> JsValue { JsValue::from_str(&message) }
 
-#[wasm_bindgen(js_name = GpuContext)]
-pub struct JsGpuContext {
-  inner: GpuContext,
+#[wasm_bindgen(js_name = DeviceContext)]
+pub struct JsDeviceContext {
+  inner: DeviceContext,
 }
-#[wasm_bindgen(js_class = GpuContext)]
-impl JsGpuContext {
+#[wasm_bindgen(js_class = DeviceContext)]
+impl JsDeviceContext {
   #[wasm_bindgen(js_name = create)]
-  pub async fn create() -> Result<JsGpuContext, JsValue> {
+  pub async fn create() -> Result<JsDeviceContext, JsValue> {
     Ok(Self {
-      inner: GpuContext::new().await.map_err(error)?,
+      inner: DeviceContext::new().await.map_err(error)?,
     })
   }
   #[wasm_bindgen(js_name = adapterName)]
@@ -66,7 +66,7 @@ pub struct JsDeviceTriangleMesh {
 impl JsDeviceTriangleMesh {
   #[wasm_bindgen(js_name = fromScene)]
   pub fn from_scene(
-    context: &JsGpuContext,
+    context: &JsDeviceContext,
     scene: &JsScene,
     mesh_index: usize,
   ) -> Result<JsDeviceTriangleMesh, JsValue> {
@@ -76,7 +76,7 @@ impl JsDeviceTriangleMesh {
       .get(mesh_index)
       .ok_or_else(|| error("triangle mesh index is out of range".into()))?;
     Ok(Self {
-      inner: Arc::new(DeviceTriangleMesh::from_triangle_mesh(&context.inner, mesh).map_err(error)?),
+      inner: Arc::new(context.inner.upload(mesh).map_err(error)?),
     })
   }
 }
@@ -126,7 +126,7 @@ pub struct JsObjViewer {
 #[wasm_bindgen(js_class = ObjViewer)]
 impl JsObjViewer {
   #[wasm_bindgen(constructor)]
-  pub fn new(context: &JsGpuContext, canvas: HtmlCanvasElement) -> Result<JsObjViewer, JsValue> {
+  pub fn new(context: &JsDeviceContext, canvas: HtmlCanvasElement) -> Result<JsObjViewer, JsValue> {
     let width = canvas.width().max(1);
     let height = canvas.height().max(1);
     let surface = context
@@ -150,7 +150,7 @@ impl JsObjViewer {
       .inner
       .meshes()
       .iter()
-      .map(|mesh| DeviceTriangleMesh::from_triangle_mesh(self.inner.context(), mesh).map(Arc::new))
+      .map(|mesh| self.inner.context().upload(mesh).map(Arc::new))
       .collect::<std::result::Result<Vec<_>, _>>()
       .map_err(error)?;
     self.inner.set_device_meshes(meshes);

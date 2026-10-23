@@ -1,4 +1,4 @@
-let context = GpuContext();
+let context = DeviceContext();
 let scene = Scene("assets/models/pyramid.obj");
 let camera = Camera(); camera.frame(scene);
 let viewer = ObjViewer(context); viewer.set_scene(scene);

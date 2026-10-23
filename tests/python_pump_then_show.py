@@ -1,7 +1,7 @@
 """A manually started native session can be finished with blocking show()."""
 import graphics as gfx
 
-context = gfx.GpuContext()
+context = gfx.DeviceContext()
 scene = gfx.Scene.from_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
 camera = gfx.Camera()
 camera.frame(scene)

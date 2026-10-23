@@ -1,4 +1,4 @@
-context = GpuContext.new()
+context = DeviceContext.new()
 scene = Scene.load_obj("assets/models/pyramid.obj")
 camera = Camera.new()
 camera:frame(scene)

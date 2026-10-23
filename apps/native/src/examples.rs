@@ -1,6 +1,6 @@
 //! Runnable Rust examples built on the engine and native host APIs.
 use crate::{NativeApp, ViewerConfig};
-use engine::{Aabb, Camera, DeviceTriangleMesh, GpuContext, ObjViewer, Scene};
+use engine::{Aabb, Camera, DeviceContext, ObjViewer, Scene};
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 /// Run one of the four Rust parity demonstrations.
@@ -8,18 +8,18 @@ pub fn run_case(case: usize) -> Result<(), String> {
   if !(1..=4).contains(&case) {
     return Err("case must be 1..=4".into());
   }
-  let context = pollster::block_on(GpuContext::new())?;
+  let context = pollster::block_on(DeviceContext::new())?;
   let first = Scene::load_obj(include_bytes!("../../../assets/models/pyramid.obj"))?;
   let second = Scene::load_obj(include_bytes!("../../../assets/models/cube.obj"))?;
   let first_meshes: Vec<_> = first
     .meshes()
     .iter()
-    .map(|mesh| DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new))
+    .map(|mesh| context.upload(mesh).map(Arc::new))
     .collect::<engine::Result<_>>()?;
   let second_meshes: Vec<_> = second
     .meshes()
     .iter()
-    .map(|mesh| DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new))
+    .map(|mesh| context.upload(mesh).map(Arc::new))
     .collect::<engine::Result<_>>()?;
   let shared_camera = Rc::new(RefCell::new(Camera::from_aabb(Aabb::from(&first))));
   let mut app = NativeApp::new();

@@ -1,7 +1,7 @@
 import graphics as gfx
 from common import MODELS, make_viewer
 
-context = gfx.GpuContext()
+context = gfx.DeviceContext()
 scene = gfx.Scene.load_obj(str(MODELS / "pyramid.obj"))
 device_mesh = gfx.DeviceTriangleMesh.from_scene(context, scene, 0)
 camera = gfx.Camera(); camera.frame(scene)

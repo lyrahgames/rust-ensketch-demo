@@ -1,8 +1,8 @@
 //! Persistent Rhai bindings for script-owned engine objects.
 #![recursion_limit = "1024"]
 use engine::{
-  Aabb, Camera, DeviceTriangleMesh, EventKind, GpuContext, InputEvent, ObjViewer, Scene, Triangle,
-  Vertex,
+  Aabb, Camera, DeviceContext, DeviceTriangleMesh, EventKind, InputEvent, ObjViewer, Scene,
+  Triangle, Vertex,
 };
 use glam::{Quat, Vec3};
 use rhai::{AST, Array, Dynamic, Engine, EvalAltResult, FnPtr, Scope};
@@ -14,7 +14,7 @@ use std::{
 
 fn err(message: String) -> Box<EvalAltResult> { message.into() }
 #[derive(Clone)]
-pub struct RhaiContext(pub GpuContext);
+pub struct RhaiContext(pub DeviceContext);
 #[derive(Clone)]
 pub struct RhaiScene(pub Scene);
 #[derive(Clone)]
@@ -88,25 +88,25 @@ pub struct RhaiRuntime {
 impl RhaiRuntime {
   pub fn new() -> Self {
     let mut engine = Engine::new();
-    engine.register_type_with_name::<RhaiContext>("GpuContext");
+    engine.register_type_with_name::<RhaiContext>("DeviceContext");
     engine.register_type_with_name::<RhaiScene>("Scene");
     engine.register_type_with_name::<RhaiDeviceTriangleMesh>("DeviceTriangleMesh");
     engine.register_type_with_name::<RhaiCamera>("Camera");
     engine.register_type_with_name::<RhaiViewer>("ObjViewer");
     engine.register_type_with_name::<RhaiInputEvent>("InputEvent");
     engine.register_fn(
-      "GpuContext",
+      "DeviceContext",
       || -> Result<RhaiContext, Box<EvalAltResult>> {
         Ok(RhaiContext(
-          pollster::block_on(GpuContext::new()).map_err(err)?,
+          pollster::block_on(DeviceContext::new()).map_err(err)?,
         ))
       },
     );
     engine.register_fn(
-      "GpuContext",
+      "DeviceContext",
       |name: &str| -> Result<RhaiContext, Box<EvalAltResult>> {
         Ok(RhaiContext(
-          pollster::block_on(GpuContext::with_adapter(Some(name))).map_err(err)?,
+          pollster::block_on(DeviceContext::with_adapter(Some(name))).map_err(err)?,
         ))
       },
     );
@@ -141,7 +141,7 @@ impl RhaiRuntime {
           .get(usize::try_from(index).unwrap_or(usize::MAX))
           .ok_or_else(|| err("triangle mesh index is out of range".into()))?;
         Ok(RhaiDeviceTriangleMesh(Arc::new(
-          DeviceTriangleMesh::from_triangle_mesh(&context.0, mesh).map_err(err)?,
+          context.0.upload(mesh).map_err(err)?,
         )))
       },
     );
@@ -279,7 +279,7 @@ impl RhaiRuntime {
           .0
           .meshes()
           .iter()
-          .map(|mesh| DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new))
+          .map(|mesh| context.upload(mesh).map(Arc::new))
           .collect::<std::result::Result<Vec<_>, _>>()
           .map_err(err)?;
         viewer.viewer.borrow_mut().set_device_meshes(meshes);
@@ -425,7 +425,7 @@ impl RhaiRuntime {
   pub fn expose_camera(&mut self, name: &str, camera: Rc<RefCell<Camera>>) {
     self.scope.push(name, RhaiCamera(camera));
   }
-  pub fn expose_context(&mut self, name: &str, context: GpuContext) {
+  pub fn expose_context(&mut self, name: &str, context: DeviceContext) {
     self.scope.push(name, RhaiContext(context));
   }
   pub fn expose_scene(&mut self, name: &str, scene: Scene) {
@@ -465,11 +465,11 @@ mod tests {
   }
   #[test]
   fn callback_replacement() {
-    if pollster::block_on(GpuContext::new()).is_err() {
+    if pollster::block_on(DeviceContext::new()).is_err() {
       return;
     }
     let mut runtime = RhaiRuntime::new();
-    let _ = runtime.eval("let context = GpuContext(); let viewer = ObjViewer(context); let camera = Camera(); viewer.on_mouse_move(|e| { camera.zoom(1.0); });").unwrap();
+    let _ = runtime.eval("let context = DeviceContext(); let viewer = ObjViewer(context); let camera = Camera(); viewer.on_mouse_move(|e| { camera.zoom(1.0); });").unwrap();
     let viewer = runtime.viewers().pop().unwrap();
     viewer
       .dispatch_input(
