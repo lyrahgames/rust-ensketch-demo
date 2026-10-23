@@ -10,9 +10,10 @@ mod executor;
 mod gpu;
 mod input;
 mod scene;
+mod vector_like;
 mod viewer;
 
-pub use aabb::{Aabb, AabbReal, VectorLike};
+pub use aabb::Aabb;
 pub use camera::Camera;
 pub use device_mesh::{DeviceTriangleMesh, GpuBuffer};
 pub use executor::{Executor, ExecutorError, Submitter, Task};
@@ -21,6 +22,7 @@ pub use input::{PointerButton, PointerInputState};
 pub use scene::{
   Scene, Triangle, TriangleMesh, TriangleTopology, Vertex, VertexGeometry, VertexIndex,
 };
+pub use vector_like::VectorLike;
 pub use viewer::{ObjViewer, RenderStatus};
 
 pub type Result<T> = std::result::Result<T, String>;

@@ -242,7 +242,8 @@ impl<S> Drop for Executor<S> {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use crate::{Executor, ExecutorError};
+  use std::{sync::atomic::Ordering, thread};
   #[test]
   fn fifo_and_result() {
     let mut e = Executor::new_main(Vec::new());

@@ -90,8 +90,7 @@ impl Vertex {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-  use crate::Scene;
+  use crate::{DeviceTriangleMesh, GpuContext, Scene, Vertex};
 
   #[test]
   fn gpu_upload_creates_typed_triangle_buffers() {

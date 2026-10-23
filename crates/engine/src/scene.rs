@@ -200,8 +200,8 @@ impl Scene {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-  use crate::Aabb;
+  use crate::{Aabb, Scene, Vertex};
+  use glam::Vec3;
 
   #[test]
   fn obj_meshes_normals_and_scene_aabb() {

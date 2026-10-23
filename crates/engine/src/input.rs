@@ -75,7 +75,7 @@ impl PointerButton {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use crate::{PointerButton, PointerInputState};
 
   #[test]
   fn pointer_state_normalizes_motion_buttons_and_wheel() {

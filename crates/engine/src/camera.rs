@@ -1,4 +1,4 @@
-use crate::{Aabb, InputEvent};
+use crate::{Aabb, EventKind, InputEvent};
 use glam::{Mat4, Quat, Vec3};
 
 #[derive(Clone, Copy, Debug)]
@@ -69,13 +69,13 @@ impl Camera {
   /// different controls can continue to compose `orbit`, `pan`, and `zoom`
   /// directly in their own callbacks.
   pub fn apply_pointer_controls(&mut self, event: &InputEvent, pivot: Vec3) {
-    if event.kind == crate::EventKind::MouseMove && event.left_pressed {
+    if event.kind == EventKind::MouseMove && event.left_pressed {
       self.orbit(pivot, event.dx, event.dy);
     }
-    if event.kind == crate::EventKind::MouseMove && (event.middle_pressed || event.right_pressed) {
+    if event.kind == EventKind::MouseMove && (event.middle_pressed || event.right_pressed) {
       self.pan(event.dx, event.dy);
     }
-    if event.kind == crate::EventKind::MouseWheel {
+    if event.kind == EventKind::MouseWheel {
       self.zoom(event.wheel * 0.2);
     }
   }
@@ -91,7 +91,8 @@ impl Camera {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use crate::Camera;
+  use glam::Vec3;
   #[test]
   fn camera_motion_and_depth() {
     let mut c = Camera::default();
