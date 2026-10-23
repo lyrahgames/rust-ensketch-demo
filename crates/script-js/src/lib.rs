@@ -126,6 +126,7 @@ impl Default for JsCamera {
 pub struct JsObjViewer {
     inner: ObjViewer,
     canvas: HtmlCanvasElement,
+    background: [f32; 4],
 }
 #[wasm_bindgen(js_class = ObjViewer)]
 impl JsObjViewer {
@@ -142,7 +143,11 @@ impl JsObjViewer {
         inner
             .attach_surface(surface, width, height)
             .map_err(error)?;
-        Ok(Self { inner, canvas })
+        Ok(Self {
+            inner,
+            canvas,
+            background: [0.08, 0.09, 0.12, 1.0],
+        })
     }
     #[wasm_bindgen(js_name = setHostScene)]
     pub fn set_host_scene(&mut self, scene: &JsHostScene) -> Result<(), JsValue> {
@@ -156,22 +161,26 @@ impl JsObjViewer {
     }
     #[wasm_bindgen(js_name = setBackgroundColor)]
     pub fn set_background_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
-        self.inner.set_background_color([r, g, b, a]);
+        self.background = [r, g, b, a];
     }
     #[wasm_bindgen(js_name = backgroundColor)]
     pub fn background_color(&self) -> Vec<f32> {
-        self.inner.background_color().to_vec()
+        self.background.to_vec()
     }
     #[wasm_bindgen(js_name = setTitle)]
     pub fn set_title(&mut self, title: String) {
-        self.inner.set_title(title);
+        self.canvas.set_title(&title);
     }
     pub fn title(&self) -> String {
-        self.inner.title().to_owned()
+        self.canvas.title()
     }
     pub fn render(&mut self, camera: &JsCamera) -> Result<(), JsValue> {
-        self.inner.render(&camera.inner).map_err(error)?;
-        if self.inner.needs_surface_recreation() {
+        if self
+            .inner
+            .render(&camera.inner, self.background)
+            .map_err(error)?
+            == engine::RenderStatus::SurfaceLost
+        {
             let surface = self
                 .inner
                 .context()
@@ -184,10 +193,10 @@ impl JsObjViewer {
         }
         Ok(())
     }
-    pub fn resize(&mut self, width: u32, height: u32) {
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), JsValue> {
         self.canvas.set_width(width);
         self.canvas.set_height(height);
-        self.inner.resize(width, height);
+        self.inner.resize(width, height).map_err(error)
     }
     pub fn close(&mut self) {
         self.inner.close();

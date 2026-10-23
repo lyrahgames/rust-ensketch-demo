@@ -1,6 +1,6 @@
 //! One winit loop, one main-thread viewer, and one worker-owned viewer.
 #![recursion_limit = "512"]
-use engine::{Camera, Executor, GpuContext, HostScene, ObjViewer};
+use engine::{Camera, Executor, GpuContext, HostScene, ObjViewer, RenderStatus};
 use script_lua::LuaRuntime;
 use script_rhai::RhaiRuntime;
 use std::{
@@ -28,6 +28,7 @@ struct WorkerState {
     rhai: RhaiRuntime,
     proxy: EventLoopProxy<MainTask>,
     recovery_requested: bool,
+    background: [f32; 4],
 }
 impl WorkerState {
     fn eval(&mut self, language: &str, source: &str) -> String {
@@ -46,10 +47,14 @@ impl WorkerState {
         }
     }
     fn render(&mut self) {
-        if let Err(error) = self.viewer.borrow_mut().render(&self.camera.borrow()) {
+        let status = self
+            .viewer
+            .borrow_mut()
+            .render(&self.camera.borrow(), self.background);
+        if let Err(error) = &status {
             eprintln!("worker render: {error}");
         }
-        if self.viewer.borrow().needs_surface_recreation() && !self.recovery_requested {
+        if matches!(status, Ok(RenderStatus::SurfaceLost)) && !self.recovery_requested {
             self.recovery_requested = true;
             let _ = self.proxy.send_event(Box::new(|app, _| {
                 let Some(window) = &app.worker_window else {
@@ -181,7 +186,6 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
         let worker = Executor::new_worker_with(move || {
             let mut viewer = ObjViewer::new(context.clone());
             viewer.set_host_scene(&scene).unwrap();
-            viewer.set_background_color([0.18, 0.07, 0.1, 1.0]);
             viewer.attach_surface(worker_surface, 800, 400).unwrap();
             let viewer = Rc::new(RefCell::new(viewer));
             let mut camera = Camera::default();
@@ -211,6 +215,7 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
                 rhai,
                 proxy,
                 recovery_requested: false,
+                background: [0.18, 0.07, 0.1, 1.0],
             }
         });
         let submitter = worker.submitter();
@@ -322,11 +327,11 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
             }
             WindowEvent::Resized(size) => {
                 if is_main && let Some(viewer) = &self.main_viewer {
-                    viewer.borrow_mut().resize(size.width, size.height);
+                    let _ = viewer.borrow_mut().resize(size.width, size.height);
                 }
                 if is_worker && let Some(worker) = &self.worker {
                     let _ = worker.spawn(move |state| {
-                        state.viewer.borrow_mut().resize(size.width, size.height)
+                        let _ = state.viewer.borrow_mut().resize(size.width, size.height);
                     });
                 }
             }
@@ -379,7 +384,9 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
             }
             WindowEvent::RedrawRequested => {
                 if is_main && let Some(viewer) = &self.main_viewer {
-                    let _ = viewer.borrow_mut().render(&self.camera.borrow());
+                    let _ = viewer
+                        .borrow_mut()
+                        .render(&self.camera.borrow(), [0.08, 0.09, 0.12, 1.0]);
                 }
                 if is_worker && let Some(worker) = &self.worker {
                     let _ = worker.spawn(WorkerState::render);

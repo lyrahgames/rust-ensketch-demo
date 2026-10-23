@@ -12,6 +12,7 @@ pub use scripting::run_rhai;
 
 use engine::{
     Camera, EventKind, Executor, InputEvent, ObjViewer, PointerButton, PointerInputState,
+    RenderStatus,
 };
 use std::{
     cell::RefCell,
@@ -37,6 +38,9 @@ pub(crate) enum HostEvent {
 pub struct ViewerConfig {
     pub viewer: Rc<RefCell<ObjViewer>>,
     pub camera: Rc<RefCell<Camera>>,
+    pub title: String,
+    pub size: (u32, u32),
+    pub background: [f32; 4],
     pub on_input: Option<Box<dyn FnMut(InputEvent)>>,
     pub on_frame: Option<Box<dyn FnMut(f32)>>,
 }
@@ -51,6 +55,9 @@ impl ViewerConfig {
         Self {
             viewer,
             camera,
+            title: "OBJ viewer".into(),
+            size: (640, 480),
+            background: [0.08, 0.09, 0.12, 1.0],
             on_input: Some(Box::new(move |event| {
                 controlled_camera
                     .borrow_mut()
@@ -159,14 +166,9 @@ impl ApplicationHandler<HostEvent> for NativeApp {
     }
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         for config in self.pending.drain(..) {
-            if config.viewer.borrow().is_closed() {
-                continue;
-            }
-            let title = config.viewer.borrow().title().to_owned();
-            let size = config.viewer.borrow().size();
             let attributes = Window::default_attributes()
-                .with_title(title)
-                .with_inner_size(PhysicalSize::new(size.0, size.1));
+                .with_title(config.title.clone())
+                .with_inner_size(PhysicalSize::new(config.size.0, config.size.1));
             let result = (|| -> Result<LiveViewer, String> {
                 let window = Arc::new(
                     event_loop
@@ -228,7 +230,8 @@ impl ApplicationHandler<HostEvent> for NativeApp {
                 live.config
                     .viewer
                     .borrow_mut()
-                    .resize(size.width, size.height);
+                    .resize(size.width, size.height)
+                    .unwrap_or_else(|error| eprintln!("viewer resize: {error}"));
                 if let Some(callback) = &mut live.config.on_input {
                     callback(InputEvent {
                         kind: EventKind::Resize,
@@ -287,14 +290,14 @@ impl ApplicationHandler<HostEvent> for NativeApp {
                 live.last_frame = now;
                 let result = if let Some(callback) = &mut live.config.on_frame {
                     callback(dt);
-                    Ok(())
+                    Ok(RenderStatus::Skipped)
                 } else {
                     live.config
                         .viewer
                         .borrow_mut()
-                        .render(&live.config.camera.borrow())
+                        .render(&live.config.camera.borrow(), live.config.background)
                 };
-                if live.config.viewer.borrow().needs_surface_recreation() {
+                if matches!(result, Ok(RenderStatus::SurfaceLost)) {
                     let context = live.config.viewer.borrow().context().clone();
                     let size = live.window.inner_size();
                     let recovery = context
@@ -327,7 +330,7 @@ impl ApplicationHandler<HostEvent> for NativeApp {
             let _ = executor.drain();
         }
         self.live
-            .retain(|_, live| !live.config.viewer.borrow().is_closed());
+            .retain(|_, live| live.config.viewer.borrow().is_attached());
         if self.live.is_empty() && self.pending.is_empty() {
             event_loop.exit();
         }
@@ -339,9 +342,8 @@ impl ApplicationHandler<HostEvent> for NativeApp {
         self.next_frame = now + Duration::from_millis(16);
         event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame));
         for live in self.live.values() {
-            let viewer = live.config.viewer.borrow();
-            live.window.set_title(viewer.title());
-            let requested = viewer.size();
+            live.window.set_title(&live.config.title);
+            let requested = live.config.size;
             let actual = live.window.inner_size();
             if requested != (actual.width, actual.height) {
                 let _ = live

@@ -313,12 +313,8 @@ mod tests {
                 .same_allocation(other_viewer.scene().unwrap())
         );
         assert!(viewer.set_device_scene(second).is_err());
-        viewer.set_background_color([0.2, 0.3, 0.4, 1.0]);
-        assert_eq!(viewer.background_color(), [0.2, 0.3, 0.4, 1.0]);
-        viewer.resize(900, 400);
-        assert_eq!(viewer.size(), (900, 400));
         viewer.close();
-        assert!(viewer.is_closed());
+        assert!(!viewer.is_attached());
         assert!(other_viewer.scene().is_some());
     }
 }

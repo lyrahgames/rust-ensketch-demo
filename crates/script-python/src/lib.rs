@@ -231,6 +231,10 @@ struct Registration {
     viewer: Rc<RefCell<ObjViewer>>,
     camera: Rc<RefCell<Camera>>,
     callbacks: Rc<RefCell<Callbacks>>,
+    background: Rc<RefCell<[f32; 4]>>,
+    title: Rc<RefCell<String>>,
+    size: Rc<RefCell<(u32, u32)>>,
+    closed: Cell<bool>,
     #[cfg(feature = "lua")]
     lua: RefCell<Option<script_lua::LuaRuntime>>,
     #[cfg(feature = "rhai")]
@@ -257,6 +261,10 @@ impl PyObjViewer {
             viewer: Rc::new(RefCell::new(ObjViewer::new(context.inner.clone()))),
             camera: Rc::new(RefCell::new(Camera::default())),
             callbacks: Rc::new(RefCell::new(Callbacks::default())),
+            background: Rc::new(RefCell::new([0.08, 0.09, 0.12, 1.0])),
+            title: Rc::new(RefCell::new("OBJ viewer".into())),
+            size: Rc::new(RefCell::new((640, 480))),
+            closed: Cell::new(false),
             #[cfg(feature = "lua")]
             lua: RefCell::new(None),
             #[cfg(feature = "rhai")]
@@ -291,35 +299,38 @@ impl PyObjViewer {
         }
     }
     fn set_background_color(&self, r: f32, g: f32, b: f32, a: f32) {
-        self.registration
-            .viewer
-            .borrow_mut()
-            .set_background_color([r, g, b, a]);
+        *self.registration.background.borrow_mut() = [r, g, b, a];
     }
     fn background_color(&self) -> (f32, f32, f32, f32) {
-        let c = self.registration.viewer.borrow().background_color();
+        let c = *self.registration.background.borrow();
         (c[0], c[1], c[2], c[3])
     }
     fn set_title(&self, title: &str) {
-        self.registration.viewer.borrow_mut().set_title(title);
+        *self.registration.title.borrow_mut() = title.to_owned();
     }
     fn title(&self) -> String {
-        self.registration.viewer.borrow().title().to_owned()
+        self.registration.title.borrow().clone()
     }
     fn set_size(&self, width: u32, height: u32) {
-        self.registration.viewer.borrow_mut().resize(width, height);
+        *self.registration.size.borrow_mut() = (width, height);
+        let _ = self.registration.viewer.borrow_mut().resize(width, height);
     }
     fn size(&self) -> (u32, u32) {
-        self.registration.viewer.borrow().size()
+        *self.registration.size.borrow()
     }
     fn render(&self, camera: PyRef<'_, PyCamera>) -> PyResult<()> {
         self.registration
             .viewer
             .borrow_mut()
-            .render(&camera.inner.borrow())
+            .render(
+                &camera.inner.borrow(),
+                *self.registration.background.borrow(),
+            )
+            .map(|_| ())
             .map_err(error)
     }
     fn close(&self) {
+        self.registration.closed.set(true);
         self.registration.viewer.borrow_mut().close();
     }
     fn on_mouse_move(&self, callback: Option<Py<PyAny>>) {
@@ -427,16 +438,20 @@ fn build_app() -> NativeApp {
     });
     let mut app = NativeApp::new();
     for registration in registrations {
-        if registration.viewer.borrow().is_closed() {
+        if registration.closed.get() {
             continue;
         }
         let mut config =
             ViewerConfig::new(registration.viewer.clone(), registration.camera.clone());
         let callbacks = registration.callbacks.clone();
+        config.title = registration.title.borrow().clone();
+        config.size = *registration.size.borrow();
+        config.background = *registration.background.borrow();
         config.on_input = Some(Box::new(move |event| invoke_event(&callbacks, event)));
         let callbacks = registration.callbacks.clone();
         let viewer = registration.viewer.clone();
         let camera = registration.camera.clone();
+        let background = registration.background.clone();
         config.on_frame = Some(Box::new(move |dt| {
             let called = Python::attach(|py| {
                 let callback = callbacks
@@ -454,7 +469,9 @@ fn build_app() -> NativeApp {
                 }
             });
             if !called {
-                let _ = viewer.borrow_mut().render(&camera.borrow());
+                let _ = viewer
+                    .borrow_mut()
+                    .render(&camera.borrow(), *background.borrow());
             }
         }));
         app.add_viewer(config);

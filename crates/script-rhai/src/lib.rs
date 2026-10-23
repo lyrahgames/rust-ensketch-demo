@@ -34,6 +34,9 @@ struct Callbacks {
 pub struct RhaiViewer {
     pub viewer: Rc<RefCell<ObjViewer>>,
     callbacks: Rc<RefCell<Callbacks>>,
+    background: Rc<RefCell<[f32; 4]>>,
+    title: Rc<RefCell<String>>,
+    size: Rc<RefCell<(u32, u32)>>,
 }
 impl RhaiViewer {
     pub fn dispatch_input(
@@ -249,7 +252,13 @@ impl RhaiRuntime {
             let callbacks = Rc::new(RefCell::new(Callbacks::default()));
             viewer_refs.borrow_mut().push(Rc::downgrade(&viewer));
             binding_refs.borrow_mut().push(Rc::downgrade(&callbacks));
-            RhaiViewer { viewer, callbacks }
+            RhaiViewer {
+                viewer,
+                callbacks,
+                background: Rc::new(RefCell::new([0.08, 0.09, 0.12, 1.0])),
+                title: Rc::new(RefCell::new("OBJ viewer".into())),
+                size: Rc::new(RefCell::new((640, 480))),
+            }
         });
         engine.register_fn(
             "set_scene",
@@ -274,35 +283,30 @@ impl RhaiRuntime {
         engine.register_fn(
             "set_background_color",
             |viewer: &mut RhaiViewer, r: f64, g: f64, b: f64, a: f64| {
-                viewer
-                    .viewer
-                    .borrow_mut()
-                    .set_background_color([r as f32, g as f32, b as f32, a as f32]);
+                *viewer.background.borrow_mut() = [r as f32, g as f32, b as f32, a as f32];
             },
         );
         engine.register_fn("background_color", |viewer: &mut RhaiViewer| -> Array {
-            viewer
-                .viewer
-                .borrow()
-                .background_color()
+            (*viewer.background.borrow())
                 .iter()
                 .map(|x| Dynamic::from(*x as f64))
                 .collect()
         });
         engine.register_fn("set_title", |viewer: &mut RhaiViewer, title: &str| {
-            viewer.viewer.borrow_mut().set_title(title)
+            *viewer.title.borrow_mut() = title.to_owned();
         });
         engine.register_fn("title", |viewer: &mut RhaiViewer| {
-            viewer.viewer.borrow().title().to_owned()
+            viewer.title.borrow().clone()
         });
         engine.register_fn("set_size", |viewer: &mut RhaiViewer, w: i64, h: i64| {
+            *viewer.size.borrow_mut() = (w.max(1) as u32, h.max(1) as u32);
             viewer
                 .viewer
                 .borrow_mut()
                 .resize(w.max(1) as u32, h.max(1) as u32)
         });
         engine.register_fn("size", |viewer: &mut RhaiViewer| -> Array {
-            let (w, h) = viewer.viewer.borrow().size();
+            let (w, h) = *viewer.size.borrow();
             vec![Dynamic::from(w as i64), Dynamic::from(h as i64)]
         });
         engine.register_fn(
@@ -311,7 +315,8 @@ impl RhaiRuntime {
                 viewer
                     .viewer
                     .borrow_mut()
-                    .render(&camera.0.borrow())
+                    .render(&camera.0.borrow(), *viewer.background.borrow())
+                    .map(|_| ())
                     .map_err(err)
             },
         );
@@ -398,7 +403,16 @@ impl RhaiRuntime {
         let callbacks = Rc::new(RefCell::new(Callbacks::default()));
         self.viewers.borrow_mut().push(Rc::downgrade(&viewer));
         self.bindings.borrow_mut().push(Rc::downgrade(&callbacks));
-        self.scope.push(name, RhaiViewer { viewer, callbacks });
+        self.scope.push(
+            name,
+            RhaiViewer {
+                viewer,
+                callbacks,
+                background: Rc::new(RefCell::new([0.08, 0.09, 0.12, 1.0])),
+                title: Rc::new(RefCell::new("OBJ viewer".into())),
+                size: Rc::new(RefCell::new((640, 480))),
+            },
+        );
     }
     pub fn expose_camera(&mut self, name: &str, camera: Rc<RefCell<Camera>>) {
         self.scope.push(name, RhaiCamera(camera));
@@ -418,6 +432,9 @@ impl RhaiRuntime {
                 Some(RhaiViewer {
                     viewer: viewer.upgrade()?,
                     callbacks: callbacks.upgrade()?,
+                    background: Rc::new(RefCell::new([0.08, 0.09, 0.12, 1.0])),
+                    title: Rc::new(RefCell::new("OBJ viewer".into())),
+                    size: Rc::new(RefCell::new((640, 480))),
                 })
             })
             .collect()

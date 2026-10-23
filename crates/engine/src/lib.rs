@@ -15,7 +15,7 @@ pub use executor::{Executor, ExecutorError, Submitter, Task};
 pub use gpu::GpuContext;
 pub use input::{PointerButton, PointerInputState};
 pub use scene::{Bounds, DeviceScene, HostScene, Mesh};
-pub use viewer::ObjViewer;
+pub use viewer::{ObjViewer, RenderStatus};
 
 pub type Result<T> = std::result::Result<T, String>;
 

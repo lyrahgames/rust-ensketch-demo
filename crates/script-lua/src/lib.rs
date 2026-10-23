@@ -128,6 +128,9 @@ struct Callbacks {
 pub struct LuaViewer {
     pub viewer: Rc<RefCell<ObjViewer>>,
     callbacks: Rc<RefCell<Callbacks>>,
+    background: Rc<RefCell<[f32; 4]>>,
+    title: Rc<RefCell<String>>,
+    size: Rc<RefCell<(u32, u32)>>,
 }
 impl LuaViewer {
     pub fn dispatch_input(&self, lua: &Lua, event: InputEvent) -> Result<()> {
@@ -200,30 +203,33 @@ impl UserData for LuaViewer {
         methods.add_method(
             "set_background_color",
             |_, this, (r, g, b, a): (f32, f32, f32, f32)| {
-                this.viewer.borrow_mut().set_background_color([r, g, b, a]);
+                *this.background.borrow_mut() = [r, g, b, a];
                 Ok(())
             },
         );
         methods.add_method("background_color", |_, this, ()| {
-            let c = this.viewer.borrow().background_color();
+            let c = *this.background.borrow();
             Ok((c[0], c[1], c[2], c[3]))
         });
         methods.add_method("set_title", |_, this, title: String| {
-            this.viewer.borrow_mut().set_title(title);
+            *this.title.borrow_mut() = title;
             Ok(())
         });
-        methods.add_method("title", |_, this, ()| {
-            Ok(this.viewer.borrow().title().to_owned())
-        });
+        methods.add_method("title", |_, this, ()| Ok(this.title.borrow().clone()));
         methods.add_method("set_size", |_, this, (w, h): (u32, u32)| {
-            this.viewer.borrow_mut().resize(w, h);
+            *this.size.borrow_mut() = (w, h);
+            let _ = this.viewer.borrow_mut().resize(w, h);
             Ok(())
         });
-        methods.add_method("size", |_, this, ()| Ok(this.viewer.borrow().size()));
+        methods.add_method("size", |_, this, ()| Ok(*this.size.borrow()));
         methods.add_method("render", |_, this, camera: AnyUserData| {
             this.viewer
                 .borrow_mut()
-                .render(&camera.borrow::<LuaCamera>()?.0.borrow())
+                .render(
+                    &camera.borrow::<LuaCamera>()?.0.borrow(),
+                    *this.background.borrow(),
+                )
+                .map(|_| ())
                 .map_err(err)
         });
         methods.add_method("close", |_, this, ()| {
@@ -319,7 +325,13 @@ impl LuaRuntime {
                 let callbacks = Rc::new(RefCell::new(Callbacks::default()));
                 viewer_refs.borrow_mut().push(Rc::downgrade(&viewer));
                 binding_refs.borrow_mut().push(Rc::downgrade(&callbacks));
-                Ok(LuaViewer { viewer, callbacks })
+                Ok(LuaViewer {
+                    viewer,
+                    callbacks,
+                    background: Rc::new(RefCell::new([0.08, 0.09, 0.12, 1.0])),
+                    title: Rc::new(RefCell::new("OBJ viewer".into())),
+                    size: Rc::new(RefCell::new((640, 480))),
+                })
             })?,
         )?;
         globals.set("ObjViewer", viewer_class)?;
@@ -340,9 +352,16 @@ impl LuaRuntime {
         let callbacks = Rc::new(RefCell::new(Callbacks::default()));
         self.viewers.borrow_mut().push(Rc::downgrade(&viewer));
         self.bindings.borrow_mut().push(Rc::downgrade(&callbacks));
-        self.lua
-            .globals()
-            .set(name, LuaViewer { viewer, callbacks })
+        self.lua.globals().set(
+            name,
+            LuaViewer {
+                viewer,
+                callbacks,
+                background: Rc::new(RefCell::new([0.08, 0.09, 0.12, 1.0])),
+                title: Rc::new(RefCell::new("OBJ viewer".into())),
+                size: Rc::new(RefCell::new((640, 480))),
+            },
+        )
     }
     pub fn expose_camera(&self, name: &str, camera: Rc<RefCell<Camera>>) -> Result<()> {
         self.lua.globals().set(name, LuaCamera(camera))
@@ -362,6 +381,9 @@ impl LuaRuntime {
                 Some(LuaViewer {
                     viewer: viewer.upgrade()?,
                     callbacks: callbacks.upgrade()?,
+                    background: Rc::new(RefCell::new([0.08, 0.09, 0.12, 1.0])),
+                    title: Rc::new(RefCell::new("OBJ viewer".into())),
+                    size: Rc::new(RefCell::new((640, 480))),
                 })
             })
             .collect()

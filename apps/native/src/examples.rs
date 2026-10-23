@@ -31,17 +31,18 @@ pub fn run_case(case: usize) -> Result<(), String> {
                 first.bounds()
             })))
         };
-        viewer.set_title(format!("Rust case {case} — viewer {}", i + 1));
-        viewer.resize(
-            if case == 4 && i == 1 { 900 } else { 640 },
-            if case == 4 && i == 1 { 400 } else { 480 },
-        );
-        viewer.set_background_color(if i == 0 {
+        let mut config = ViewerConfig::new(Rc::new(RefCell::new(viewer)), camera.clone());
+        config.title = format!("Rust case {case} — viewer {}", i + 1);
+        config.size = if case == 4 && i == 1 {
+            (900, 400)
+        } else {
+            (640, 480)
+        };
+        config.background = if i == 0 {
             [0.08, 0.09, 0.12, 1.0]
         } else {
             [0.17, 0.08, 0.12, 1.0]
-        });
-        let config = ViewerConfig::new(Rc::new(RefCell::new(viewer)), camera.clone());
+        };
         app.add_viewer(config);
     }
     app.show()

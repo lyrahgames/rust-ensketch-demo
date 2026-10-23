@@ -6,6 +6,5 @@ fn main() -> Result<(), String> {
     let scene = HostScene::load_obj(include_bytes!("../../assets/models/pyramid.obj"))?;
     let mut viewer = ObjViewer::new(context);
     viewer.set_host_scene(&scene)?;
-    viewer.set_title("Minimal engine viewer");
     NativeApp::show_obj_viewer(viewer, Camera::from_bounds(scene.bounds()))
 }
