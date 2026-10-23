@@ -1,0 +1,5 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WebGPU OBJ case 4</title><style>body{font:16px system-ui;background:#20232a;color:white;padding:1rem}main{display:flex;gap:1rem;flex-wrap:wrap}canvas{max-width:100%;border:1px solid #555;touch-action:none}</style>
+<h1>Case 4: shared device scene and camera</h1><p>Drag either canvas to move both cameras; the canvases have different aspect ratios.</p>
+<main><section><label>Background A <input type="color" value="#14171f"></label><canvas width="640" height="480"></canvas></section><section><label>Background B <input type="color" value="#2b141f"></label><canvas width="900" height="400"></canvas></section></main><p id="error"></p>
+<script type="module">import {run} from './common.js'; run(4).catch(e => document.querySelector('#error').textContent = String(e));</script></html>

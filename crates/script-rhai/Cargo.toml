@@ -1,0 +1,9 @@
+[package]
+name = "script-rhai"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+engine.workspace = true
+rhai.workspace = true
+pollster.workspace = true
+glam.workspace = true

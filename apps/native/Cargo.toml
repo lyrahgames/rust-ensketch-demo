@@ -1,0 +1,37 @@
+[package]
+name = "native"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+engine.workspace = true
+winit.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
+glam.workspace = true
+[features]
+lua = ["dep:script-lua"]
+rhai = ["dep:script-rhai"]
+[dependencies.script-lua]
+path = "../../crates/script-lua"
+optional = true
+[dependencies.script-rhai]
+path = "../../crates/script-rhai"
+optional = true
+
+[[example]]
+name = "worker"
+path = "examples/worker.rs"
+required-features = ["lua", "rhai"]
+
+[[example]]
+name = "rust-case-1"
+path = "../../examples/rust/case-1.rs"
+[[example]]
+name = "rust-case-2"
+path = "../../examples/rust/case-2.rs"
+[[example]]
+name = "rust-case-3"
+path = "../../examples/rust/case-3.rs"
+[[example]]
+name = "rust-case-4"
+path = "../../examples/rust/case-4.rs"

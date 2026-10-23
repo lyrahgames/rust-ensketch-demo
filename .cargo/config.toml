@@ -1,0 +1,4 @@
+[alias]
+graphics-check = "check --workspace"
+graphics-test = "test --workspace"
+graphics-native = "run -p native"

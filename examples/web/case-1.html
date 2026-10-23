@@ -1,0 +1,5 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WebGPU OBJ case 1</title><style>body{font:16px system-ui;background:#20232a;color:white;padding:1rem}canvas{display:block;max-width:100%;border:1px solid #555;touch-action:none}</style>
+<h1>Case 1: one viewer</h1><p>Drag to orbit, right drag to pan, scroll to zoom. Background <input type="color" value="#14171f"></p>
+<canvas width="640" height="480"></canvas><p id="error"></p>
+<script type="module">import {run} from './common.js'; run(1).catch(e => document.querySelector('#error').textContent = String(e));</script></html>

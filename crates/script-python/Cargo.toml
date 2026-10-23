@@ -1,0 +1,22 @@
+[package]
+name = "graphics"
+version = "0.1.0"
+edition = "2024"
+[lib]
+name = "graphics"
+crate-type = ["cdylib"]
+[dependencies]
+engine.workspace = true
+pyo3.workspace = true
+pollster.workspace = true
+native = { path = "../../apps/native" }
+glam.workspace = true
+[features]
+lua = ["dep:script-lua"]
+rhai = ["dep:script-rhai"]
+[dependencies.script-lua]
+path = "../script-lua"
+optional = true
+[dependencies.script-rhai]
+path = "../script-rhai"
+optional = true

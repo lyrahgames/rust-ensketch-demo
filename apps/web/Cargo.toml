@@ -1,0 +1,6 @@
+[package]
+name = "web"
+version = "0.1.0"
+edition = "2024"
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+script-js = { path = "../../crates/script-js" }

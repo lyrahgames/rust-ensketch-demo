@@ -1,0 +1,4 @@
+packages: []
+
+allowBuilds:
+  wasm-pack: true

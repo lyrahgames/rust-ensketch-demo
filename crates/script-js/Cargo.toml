@@ -1,0 +1,19 @@
+[package]
+name = "script-js"
+version = "0.1.0"
+edition = "2024"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+engine.workspace = true
+wasm-bindgen.workspace = true
+js-sys.workspace = true
+web-sys = { workspace = true, features = ["Window", "Document", "HtmlCanvasElement", "Request", "Response", "Headers", "console"] }
+wasm-bindgen-futures.workspace = true
+glam.workspace = true
+wgpu.workspace = true
+getrandom = { version = "0.3", features = ["wasm_js"] }

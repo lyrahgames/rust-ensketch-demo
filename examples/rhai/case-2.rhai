@@ -1,0 +1,14 @@
+let context = GpuContext();
+let scene_a = HostScene("assets/models/pyramid.obj");
+let scene_b = HostScene("assets/models/cube.obj");
+let camera_a = Camera(); camera_a.frame(scene_a);
+let camera_b = Camera(); camera_b.frame(scene_b);
+let viewer_a = ObjViewer(context); viewer_a.set_scene(scene_a); viewer_a.set_title("Rhai case 2 A");
+let viewer_b = ObjViewer(context); viewer_b.set_scene(scene_b); viewer_b.set_title("Rhai case 2 B");
+viewer_b.set_background_color(0.17, 0.08, 0.12, 1.0);
+viewer_a.on_mouse_move(|e| { if e.left_pressed { camera_a.orbit(e.dx,e.dy); } if e.middle_pressed || e.right_pressed { camera_a.pan(e.dx,e.dy); } });
+viewer_b.on_mouse_move(|e| { if e.left_pressed { camera_b.orbit(e.dx,e.dy); } if e.middle_pressed || e.right_pressed { camera_b.pan(e.dx,e.dy); } });
+viewer_a.on_mouse_wheel(|e| { camera_a.zoom(e.wheel * 0.2); });
+viewer_b.on_mouse_wheel(|e| { camera_b.zoom(e.wheel * 0.2); });
+viewer_a.on_frame(|v,dt| { v.render(camera_a); });
+viewer_b.on_frame(|v,dt| { v.render(camera_b); });

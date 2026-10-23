@@ -1,0 +1,5 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WebGPU OBJ case 2</title><style>body{font:16px system-ui;background:#20232a;color:white;padding:1rem}main{display:flex;gap:1rem;flex-wrap:wrap}canvas{max-width:100%;border:1px solid #555;touch-action:none}</style>
+<h1>Case 2: independent viewers</h1><p>Each canvas has its own scene and camera. Drag to orbit, right drag to pan, scroll to zoom.</p>
+<main><section><label>Background A <input type="color" value="#14171f"></label><canvas width="640" height="480"></canvas></section><section><label>Background B <input type="color" value="#2b141f"></label><canvas width="640" height="480"></canvas></section></main><p id="error"></p>
+<script type="module">import {run} from './common.js'; run(2).catch(e => document.querySelector('#error').textContent = String(e));</script></html>
