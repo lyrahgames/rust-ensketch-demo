@@ -104,7 +104,7 @@ impl UserData for LuaCamera {
         methods.add_method("frame", |_, this, scene: AnyUserData| {
             this.0
                 .borrow_mut()
-                .frame(scene.borrow::<LuaHostScene>()?.0.bounds());
+                .frame_aabb(scene.borrow::<LuaHostScene>()?.0.aabb());
             Ok(())
         });
         methods.add_method("reset", |_, this, ()| {

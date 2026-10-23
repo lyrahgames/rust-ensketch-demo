@@ -8,11 +8,20 @@ use std::{
 use wgpu::util::DeviceExt;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Bounds {
+pub struct Aabb {
     pub min: Vec3,
     pub max: Vec3,
 }
-impl Bounds {
+impl Aabb {
+    pub fn from_points(points: impl IntoIterator<Item = Vec3>) -> Option<Self> {
+        let mut points = points.into_iter();
+        let first = points.next()?;
+        let (min, max) = points.fold((first, first), |(min, max), point| {
+            (min.min(point), max.max(point))
+        });
+        Some(Self { min, max })
+    }
+
     pub fn center(self) -> Vec3 {
         (self.min + self.max) * 0.5
     }
@@ -22,20 +31,18 @@ impl Bounds {
 }
 
 #[derive(Clone, Debug)]
-pub struct Mesh {
-    pub name: String,
+pub struct TriangleMesh {
     pub positions: Vec<Vec3>,
     pub normals: Vec<Vec3>,
     pub texcoords: Option<Vec<[f32; 2]>>,
     pub indices: Vec<u32>,
-    pub bounds: Bounds,
 }
 
 #[derive(Clone)]
 pub struct HostScene(Arc<HostInner>);
 struct HostInner {
-    meshes: Vec<Mesh>,
-    bounds: Bounds,
+    meshes: Vec<TriangleMesh>,
+    aabb: Aabb,
     uploads: Mutex<Vec<Weak<DeviceInner>>>,
 }
 
@@ -121,21 +128,15 @@ impl HostScene {
                     .map(|v| [v[0], v[1]])
                     .collect()
             });
-            let min = positions
-                .iter()
-                .fold(Vec3::splat(f32::INFINITY), |a, p| a.min(*p));
-            let max = positions
-                .iter()
-                .fold(Vec3::splat(f32::NEG_INFINITY), |a, p| a.max(*p));
-            all_min = all_min.min(min);
-            all_max = all_max.max(max);
-            meshes.push(Mesh {
-                name: model.name,
+            for position in &positions {
+                all_min = all_min.min(*position);
+                all_max = all_max.max(*position);
+            }
+            meshes.push(TriangleMesh {
                 positions,
                 normals,
                 texcoords,
                 indices: source.indices,
-                bounds: Bounds { min, max },
             });
         }
         if meshes.is_empty() {
@@ -143,18 +144,18 @@ impl HostScene {
         }
         Ok(Self(Arc::new(HostInner {
             meshes,
-            bounds: Bounds {
+            aabb: Aabb {
                 min: all_min,
                 max: all_max,
             },
             uploads: Mutex::new(Vec::new()),
         })))
     }
-    pub fn meshes(&self) -> &[Mesh] {
+    pub fn meshes(&self) -> &[TriangleMesh] {
         &self.0.meshes
     }
-    pub fn bounds(&self) -> Bounds {
-        self.0.bounds
+    pub fn aabb(&self) -> Aabb {
+        self.0.aabb
     }
     pub fn upload(&self, context: &GpuContext) -> Result<DeviceScene> {
         let mut uploads = self.0.uploads.lock().map_err(|e| e.to_string())?;
@@ -198,7 +199,7 @@ impl HostScene {
         let scene = Arc::new(DeviceInner {
             context: context.clone(),
             meshes,
-            bounds: self.bounds(),
+            aabb: self.aabb(),
         });
         uploads.push(Arc::downgrade(&scene));
         Ok(DeviceScene(scene))
@@ -228,7 +229,7 @@ pub struct DeviceScene(Arc<DeviceInner>);
 struct DeviceInner {
     context: GpuContext,
     meshes: Vec<DeviceMesh>,
-    bounds: Bounds,
+    aabb: Aabb,
 }
 struct DeviceMesh {
     vertex: wgpu::Buffer,
@@ -236,8 +237,8 @@ struct DeviceMesh {
     count: u32,
 }
 impl DeviceScene {
-    pub fn bounds(&self) -> Bounds {
-        self.0.bounds
+    pub fn aabb(&self) -> Aabb {
+        self.0.aabb
     }
     pub fn same_allocation(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
@@ -258,7 +259,7 @@ mod tests {
         let data = b"o first\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\no second\nv 0 0 1\nf 1 3 4\n";
         let scene = HostScene::load_obj(data).unwrap();
         assert_eq!(scene.meshes().len(), 2);
-        assert_eq!(scene.bounds().max, Vec3::new(1.0, 1.0, 1.0));
+        assert_eq!(scene.aabb().max, Vec3::new(1.0, 1.0, 1.0));
         assert_eq!(scene.meshes()[0].indices.len(), 3);
         assert!(scene.meshes()[0].normals.iter().all(|n| n.length() > 0.9));
     }
@@ -287,6 +288,14 @@ mod tests {
         let b = mesh.positions[front[1] as usize];
         let c = mesh.positions[front[2] as usize];
         assert!((b - a).cross(c - a).z > 0.0);
+    }
+    #[test]
+    fn obj_loader_triangulates_polygon_faces() {
+        let scene =
+            HostScene::load_obj(b"v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n").unwrap();
+        let mesh = &scene.meshes()[0];
+        assert_eq!(mesh.indices.len(), 6);
+        assert_eq!(mesh.indices.len() % 3, 0);
     }
     #[test]
     fn gpu_upload_reuse_and_context_check() {

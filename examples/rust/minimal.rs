@@ -6,5 +6,5 @@ fn main() -> Result<(), String> {
     let scene = HostScene::load_obj(include_bytes!("../../assets/models/pyramid.obj"))?;
     let mut viewer = ObjViewer::new(context);
     viewer.set_host_scene(&scene)?;
-    NativeApp::show_obj_viewer(viewer, Camera::from_bounds(scene.bounds()))
+    NativeApp::show_obj_viewer(viewer, Camera::from_aabb(scene.aabb()))
 }

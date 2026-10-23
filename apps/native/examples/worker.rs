@@ -189,7 +189,7 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
             viewer.attach_surface(worker_surface, 800, 400).unwrap();
             let viewer = Rc::new(RefCell::new(viewer));
             let mut camera = Camera::default();
-            camera.frame(scene.bounds());
+            camera.frame_aabb(scene.aabb());
             let camera = Rc::new(RefCell::new(camera));
             let lua = LuaRuntime::new().unwrap();
             lua.expose_viewer("viewer", viewer.clone()).unwrap();
@@ -414,7 +414,7 @@ fn main() {
     let context = pollster::block_on(GpuContext::new()).unwrap();
     let scene = HostScene::load_obj(include_bytes!("../../../assets/models/pyramid.obj")).unwrap();
     let mut camera = Camera::default();
-    camera.frame(scene.bounds());
+    camera.frame_aabb(scene.aabb());
     let event_loop = EventLoop::<MainTask>::with_user_event().build().unwrap();
     let proxy = event_loop.create_proxy();
     let mut app = ThreadedApp {

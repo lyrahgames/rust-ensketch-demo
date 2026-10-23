@@ -142,7 +142,7 @@ impl PyCamera {
         self.inner.borrow_mut().reset();
     }
     fn frame(&self, scene: PyRef<'_, PyHostScene>) {
-        self.inner.borrow_mut().frame(scene.inner.bounds());
+        self.inner.borrow_mut().frame_aabb(scene.inner.aabb());
     }
 }
 
@@ -278,7 +278,7 @@ impl PyObjViewer {
             self.registration
                 .camera
                 .borrow_mut()
-                .frame(host.inner.bounds());
+                .frame_aabb(host.inner.aabb());
             self.registration
                 .viewer
                 .borrow_mut()
@@ -288,7 +288,7 @@ impl PyObjViewer {
             self.registration
                 .camera
                 .borrow_mut()
-                .frame(device.inner.bounds());
+                .frame_aabb(device.inner.aabb());
             self.registration
                 .viewer
                 .borrow_mut()

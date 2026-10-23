@@ -17,5 +17,5 @@ fn lua_and_rhai_bind_the_same_engine_viewer() {
     assert!(viewer.borrow().scene().is_some());
     let value = rhai.eval("viewer.set_scene(scene)").unwrap();
     assert!(value.is_unit());
-    assert_eq!(viewer.borrow().scene().unwrap().bounds(), scene.bounds());
+    assert_eq!(viewer.borrow().scene().unwrap().aabb(), scene.aabb());
 }

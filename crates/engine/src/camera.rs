@@ -1,4 +1,4 @@
-use crate::{Bounds, InputEvent};
+use crate::{Aabb, InputEvent};
 use glam::{Mat4, Quat, Vec3};
 
 #[derive(Clone, Copy, Debug)]
@@ -23,10 +23,10 @@ impl Default for Camera {
 }
 
 impl Camera {
-    /// Create a camera framed on the supplied scene bounds.
-    pub fn from_bounds(bounds: Bounds) -> Self {
+    /// Create a camera framed on the supplied axis-aligned bounding box.
+    pub fn from_aabb(aabb: Aabb) -> Self {
         let mut camera = Self::default();
-        camera.frame(bounds);
+        camera.frame_aabb(aabb);
         camera
     }
 
@@ -86,10 +86,9 @@ impl Camera {
     pub fn reset(&mut self) {
         *self = Self::default();
     }
-    pub fn frame(&mut self, bounds: Bounds) {
-        let radius = bounds.radius().max(0.01);
-        self.position =
-            bounds.center() + Vec3::Z * (radius / (self.vertical_fov * 0.5).tan() * 1.4);
+    pub fn frame_aabb(&mut self, aabb: Aabb) {
+        let radius = aabb.radius().max(0.01);
+        self.position = aabb.center() + Vec3::Z * (radius / (self.vertical_fov * 0.5).tan() * 1.4);
         self.orientation = Quat::IDENTITY;
         self.near = (radius * 0.001).max(0.001);
         self.far = (radius * 100.0).max(100.0);

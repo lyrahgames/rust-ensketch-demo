@@ -87,7 +87,7 @@ impl JsCamera {
         }
     }
     pub fn frame(&mut self, scene: &JsHostScene) {
-        self.inner.frame(scene.inner.bounds());
+        self.inner.frame_aabb(scene.inner.aabb());
     }
     pub fn orbit(&mut self, dx: f32, dy: f32) {
         self.inner.orbit(Vec3::ZERO, dx, dy);

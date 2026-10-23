@@ -12,7 +12,7 @@ pub fn run_case(case: usize) -> Result<(), String> {
     let first = HostScene::load_obj(include_bytes!("../../../assets/models/pyramid.obj"))?;
     let second = HostScene::load_obj(include_bytes!("../../../assets/models/cube.obj"))?;
     let shared_device = (case == 4).then(|| first.upload(&context)).transpose()?;
-    let shared_camera = Rc::new(RefCell::new(Camera::from_bounds(first.bounds())));
+    let shared_camera = Rc::new(RefCell::new(Camera::from_aabb(first.aabb())));
     let mut app = NativeApp::new();
     let count = if case == 1 { 1 } else { 2 };
     for i in 0..count {
@@ -25,10 +25,10 @@ pub fn run_case(case: usize) -> Result<(), String> {
         let camera = if case == 4 || i == 0 {
             shared_camera.clone()
         } else {
-            Rc::new(RefCell::new(Camera::from_bounds(if case == 2 {
-                second.bounds()
+            Rc::new(RefCell::new(Camera::from_aabb(if case == 2 {
+                second.aabb()
             } else {
-                first.bounds()
+                first.aabb()
             })))
         };
         let mut config = ViewerConfig::new(Rc::new(RefCell::new(viewer)), camera.clone());

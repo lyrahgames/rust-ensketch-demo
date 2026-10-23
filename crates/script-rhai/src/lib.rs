@@ -135,7 +135,7 @@ impl RhaiRuntime {
             },
         );
         engine.register_fn("frame", |camera: &mut RhaiCamera, scene: RhaiHostScene| {
-            camera.0.borrow_mut().frame(scene.0.bounds())
+            camera.0.borrow_mut().frame_aabb(scene.0.aabb())
         });
         engine.register_fn("orbit", |camera: &mut RhaiCamera, dx: f64, dy: f64| {
             camera
