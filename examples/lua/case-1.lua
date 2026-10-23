@@ -1,5 +1,5 @@
 context = GpuContext.new()
-scene = HostScene.load_obj("assets/models/pyramid.obj")
+scene = Scene.load_obj("assets/models/pyramid.obj")
 camera = Camera.new()
 camera:frame(scene)
 viewer = ObjViewer.new(context)

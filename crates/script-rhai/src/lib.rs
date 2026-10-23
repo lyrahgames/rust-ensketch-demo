@@ -1,10 +1,15 @@
 //! Persistent Rhai bindings for script-owned engine objects.
-use engine::{Camera, DeviceScene, EventKind, GpuContext, HostScene, InputEvent, ObjViewer};
+#![recursion_limit = "1024"]
+use engine::{
+    Camera, DeviceTriangleMesh, EventKind, GpuContext, InputEvent, ObjViewer, Scene, Triangle,
+    Vertex,
+};
 use glam::{Quat, Vec3};
 use rhai::{AST, Array, Dynamic, Engine, EvalAltResult, FnPtr, Scope};
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
+    sync::Arc,
 };
 
 fn err(message: String) -> Box<EvalAltResult> {
@@ -13,9 +18,9 @@ fn err(message: String) -> Box<EvalAltResult> {
 #[derive(Clone)]
 pub struct RhaiContext(pub GpuContext);
 #[derive(Clone)]
-pub struct RhaiHostScene(pub HostScene);
+pub struct RhaiScene(pub Scene);
 #[derive(Clone)]
-pub struct RhaiDeviceScene(pub DeviceScene);
+pub struct RhaiDeviceTriangleMesh(pub Arc<DeviceTriangleMesh<Vertex, Triangle>>);
 #[derive(Clone)]
 pub struct RhaiCamera(pub Rc<RefCell<Camera>>);
 #[derive(Clone)]
@@ -86,8 +91,8 @@ impl RhaiRuntime {
     pub fn new() -> Self {
         let mut engine = Engine::new();
         engine.register_type_with_name::<RhaiContext>("GpuContext");
-        engine.register_type_with_name::<RhaiHostScene>("HostScene");
-        engine.register_type_with_name::<RhaiDeviceScene>("DeviceScene");
+        engine.register_type_with_name::<RhaiScene>("Scene");
+        engine.register_type_with_name::<RhaiDeviceTriangleMesh>("DeviceTriangleMesh");
         engine.register_type_with_name::<RhaiCamera>("Camera");
         engine.register_type_with_name::<RhaiViewer>("ObjViewer");
         engine.register_type_with_name::<RhaiInputEvent>("InputEvent");
@@ -114,10 +119,10 @@ impl RhaiRuntime {
             context.0.limits().max_texture_dimension_2d as i64
         });
         engine.register_fn(
-            "HostScene",
-            |path: &str| -> Result<RhaiHostScene, Box<EvalAltResult>> {
+            "Scene",
+            |path: &str| -> Result<RhaiScene, Box<EvalAltResult>> {
                 let bytes = std::fs::read(path).map_err(|e| err(e.to_string()))?;
-                Ok(RhaiHostScene(HostScene::load_obj(&bytes).map_err(err)?))
+                Ok(RhaiScene(Scene::load_obj(&bytes).map_err(err)?))
             },
         );
         engine.register_fn("Camera", || {
@@ -127,14 +132,22 @@ impl RhaiRuntime {
             vec![Dynamic::from(x), Dynamic::from(y), Dynamic::from(z)]
         });
         engine.register_fn(
-            "upload",
-            |scene: &mut RhaiHostScene,
-             context: RhaiContext|
-             -> Result<RhaiDeviceScene, Box<EvalAltResult>> {
-                Ok(RhaiDeviceScene(scene.0.upload(&context.0).map_err(err)?))
+            "DeviceTriangleMesh",
+            |context: RhaiContext,
+             scene: RhaiScene,
+             index: i64|
+             -> Result<RhaiDeviceTriangleMesh, Box<EvalAltResult>> {
+                let mesh = scene
+                    .0
+                    .meshes()
+                    .get(usize::try_from(index).unwrap_or(usize::MAX))
+                    .ok_or_else(|| err("triangle mesh index is out of range".into()))?;
+                Ok(RhaiDeviceTriangleMesh(Arc::new(
+                    DeviceTriangleMesh::from_triangle_mesh(&context.0, mesh).map_err(err)?,
+                )))
             },
         );
-        engine.register_fn("frame", |camera: &mut RhaiCamera, scene: RhaiHostScene| {
+        engine.register_fn("frame", |camera: &mut RhaiCamera, scene: RhaiScene| {
             camera.0.borrow_mut().frame_aabb(scene.0.aabb())
         });
         engine.register_fn("orbit", |camera: &mut RhaiCamera, dx: f64, dy: f64| {
@@ -262,22 +275,25 @@ impl RhaiRuntime {
         });
         engine.register_fn(
             "set_scene",
-            |viewer: &mut RhaiViewer, scene: RhaiHostScene| -> Result<(), Box<EvalAltResult>> {
-                viewer
-                    .viewer
-                    .borrow_mut()
-                    .set_host_scene(&scene.0)
-                    .map_err(err)
+            |viewer: &mut RhaiViewer, scene: RhaiScene| -> Result<(), Box<EvalAltResult>> {
+                let context = viewer.viewer.borrow().context().clone();
+                let meshes = scene
+                    .0
+                    .meshes()
+                    .iter()
+                    .map(|mesh| {
+                        DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new)
+                    })
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(err)?;
+                viewer.viewer.borrow_mut().set_device_meshes(meshes);
+                Ok(())
             },
         );
         engine.register_fn(
             "set_scene",
-            |viewer: &mut RhaiViewer, scene: RhaiDeviceScene| -> Result<(), Box<EvalAltResult>> {
-                viewer
-                    .viewer
-                    .borrow_mut()
-                    .set_device_scene(scene.0)
-                    .map_err(err)
+            |viewer: &mut RhaiViewer, scene: RhaiDeviceTriangleMesh| {
+                viewer.viewer.borrow_mut().set_device_mesh(scene.0);
             },
         );
         engine.register_fn(
@@ -420,8 +436,8 @@ impl RhaiRuntime {
     pub fn expose_context(&mut self, name: &str, context: GpuContext) {
         self.scope.push(name, RhaiContext(context));
     }
-    pub fn expose_host_scene(&mut self, name: &str, scene: HostScene) {
-        self.scope.push(name, RhaiHostScene(scene));
+    pub fn expose_scene(&mut self, name: &str, scene: Scene) {
+        self.scope.push(name, RhaiScene(scene));
     }
     pub fn viewers(&self) -> Vec<RhaiViewer> {
         self.viewers

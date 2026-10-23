@@ -1,9 +1,9 @@
 let context = GpuContext();
-let scene = HostScene("assets/models/pyramid.obj");
-let device_scene = scene.upload(context);
+let scene = Scene("assets/models/pyramid.obj");
+let device_mesh = DeviceTriangleMesh(context, scene, 0);
 let camera = Camera(); camera.frame(scene);
-let viewer_a = ObjViewer(context); viewer_a.set_scene(device_scene); viewer_a.set_title("Rhai case 4 A");
-let viewer_b = ObjViewer(context); viewer_b.set_scene(device_scene); viewer_b.set_title("Rhai case 4 B");
+let viewer_a = ObjViewer(context); viewer_a.set_scene(device_mesh); viewer_a.set_title("Rhai case 4 A");
+let viewer_b = ObjViewer(context); viewer_b.set_scene(device_mesh); viewer_b.set_title("Rhai case 4 B");
 viewer_b.set_size(900, 400);
 viewer_b.set_background_color(0.17, 0.08, 0.12, 1.0);
 viewer_a.on_mouse_move(|e| { if e.left_pressed { camera.orbit(e.dx,e.dy); } if e.middle_pressed || e.right_pressed { camera.pan(e.dx,e.dy); } });

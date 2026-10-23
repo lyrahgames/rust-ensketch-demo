@@ -1,11 +1,7 @@
-use crate::{GpuContext, Result};
+use crate::Result;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
-use std::{
-    io::BufReader,
-    sync::{Arc, Mutex, Weak},
-};
-use wgpu::util::DeviceExt;
+use std::io::BufReader;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Aabb {
@@ -21,7 +17,6 @@ impl Aabb {
         });
         Some(Self { min, max })
     }
-
     pub fn center(self) -> Vec3 {
         (self.min + self.max) * 0.5
     }
@@ -30,23 +25,121 @@ impl Aabb {
     }
 }
 
+/// A vertex record containing position, normal, and texture coordinates.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq)]
+pub struct Vertex {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub uv: [f32; 2],
+}
+
+pub trait VertexLike {
+    fn position(&self) -> [f32; 3];
+    fn normal(&self) -> [f32; 3];
+    fn uv(&self) -> [f32; 2];
+}
+impl VertexLike for Vertex {
+    fn position(&self) -> [f32; 3] {
+        self.position
+    }
+    fn normal(&self) -> [f32; 3] {
+        self.normal
+    }
+    fn uv(&self) -> [f32; 2] {
+        self.uv
+    }
+}
+
+/// A range of vertex-like values; vectors are the standard geometry container.
 #[derive(Clone, Debug)]
-pub struct TriangleMesh {
-    pub positions: Vec<Vec3>,
-    pub normals: Vec<Vec3>,
-    pub texcoords: Option<Vec<[f32; 2]>>,
-    pub indices: Vec<u32>,
+pub struct VertexGeometry<V: VertexLike = Vertex>(pub Vec<V>);
+impl<V: VertexLike> VertexGeometry<V> {
+    pub fn new(vertices: Vec<V>) -> Self {
+        Self(vertices)
+    }
+    pub fn iter(&self) -> std::slice::Iter<'_, V> {
+        self.0.iter()
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
-#[derive(Clone)]
-pub struct HostScene(Arc<HostInner>);
-struct HostInner {
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq, Hash)]
+pub struct VertexIndex(pub u32);
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
+pub struct Triangle(pub [VertexIndex; 3]);
+
+/// A range of triangles. The container is generic so arrays, slices, and
+/// application-specific iterable collections can be used without changing the
+/// triangle representation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TriangleTopology<T = Vec<Triangle>>(pub T);
+impl<T> TriangleTopology<T> {
+    pub fn iter(&self) -> impl Iterator<Item = &Triangle>
+    where
+        for<'a> &'a T: IntoIterator<Item = &'a Triangle>,
+    {
+        (&self.0).into_iter()
+    }
+}
+
+/// CPU triangle data: topology refers to vertices in its geometry range.
+#[derive(Clone, Debug)]
+pub struct TriangleMesh<G = VertexGeometry, T = TriangleTopology> {
+    pub topology: T,
+    pub geometry: G,
+}
+
+/// CPU-only scene data. It has no GPU resources, upload cache, or stored AABB.
+#[derive(Clone, Debug)]
+pub struct Scene {
     meshes: Vec<TriangleMesh>,
-    aabb: Aabb,
-    uploads: Mutex<Vec<Weak<DeviceInner>>>,
 }
+impl Scene {
+    pub fn new(meshes: Vec<TriangleMesh>) -> Result<Self> {
+        if meshes.is_empty() {
+            return Err("scene contains no triangle meshes".into());
+        }
+        for (mesh_index, mesh) in meshes.iter().enumerate() {
+            let vertex_count = mesh.geometry.len();
+            if vertex_count == 0 || mesh.topology.0.is_empty() {
+                return Err(format!("triangle mesh {mesh_index} is empty"));
+            }
+            if mesh.geometry.iter().any(|vertex| {
+                vertex
+                    .position()
+                    .into_iter()
+                    .chain(vertex.normal())
+                    .chain(vertex.uv())
+                    .any(|value| !value.is_finite())
+            }) {
+                return Err(format!(
+                    "triangle mesh {mesh_index} has non-finite vertex data"
+                ));
+            }
+            for triangle in &mesh.topology.0 {
+                if triangle
+                    .0
+                    .iter()
+                    .any(|index| index.0 as usize >= vertex_count)
+                {
+                    return Err(format!(
+                        "triangle mesh {mesh_index} contains an out-of-range vertex index"
+                    ));
+                }
+            }
+        }
+        Ok(Self { meshes })
+    }
 
-impl HostScene {
     pub fn load_obj(bytes: &[u8]) -> Result<Self> {
         let mut reader = BufReader::new(bytes);
         let (models, _) = tobj::load_obj_buf(
@@ -60,14 +153,12 @@ impl HostScene {
         )
         .map_err(|e| format!("invalid OBJ: {e}"))?;
         let mut meshes = Vec::new();
-        let mut all_min = Vec3::splat(f32::INFINITY);
-        let mut all_max = Vec3::splat(f32::NEG_INFINITY);
         for model in models {
             let source = model.mesh;
             if source.positions.len() % 3 != 0 || source.indices.len() % 3 != 0 {
                 return Err(format!("mesh {} has malformed triangles", model.name));
             }
-            let positions: Vec<_> = source
+            let positions: Vec<Vec3> = source
                 .positions
                 .as_chunks::<3>()
                 .0
@@ -106,14 +197,14 @@ impl HostScene {
                     let a = positions[face[0] as usize];
                     let b = positions[face[1] as usize];
                     let c = positions[face[2] as usize];
-                    let n = (b - a).cross(c - a);
-                    for &i in face {
-                        normals[i as usize] += n;
+                    let normal = (b - a).cross(c - a);
+                    for &index in face {
+                        normals[index as usize] += normal;
                     }
                 }
-                for n in &mut normals {
-                    *n = if n.length_squared() > 0.0 {
-                        n.normalize()
+                for normal in &mut normals {
+                    *normal = if normal.length_squared() > 0.0 {
+                        normal.normalize()
                     } else {
                         Vec3::Y
                     };
@@ -126,204 +217,99 @@ impl HostScene {
                     .0
                     .iter()
                     .map(|v| [v[0], v[1]])
-                    .collect()
+                    .collect::<Vec<_>>()
             });
-            for position in &positions {
-                all_min = all_min.min(*position);
-                all_max = all_max.max(*position);
-            }
-            meshes.push(TriangleMesh {
-                positions,
-                normals,
-                texcoords,
-                indices: source.indices,
-            });
-        }
-        if meshes.is_empty() {
-            return Err("OBJ contains no triangle meshes".into());
-        }
-        Ok(Self(Arc::new(HostInner {
-            meshes,
-            aabb: Aabb {
-                min: all_min,
-                max: all_max,
-            },
-            uploads: Mutex::new(Vec::new()),
-        })))
-    }
-    pub fn meshes(&self) -> &[TriangleMesh] {
-        &self.0.meshes
-    }
-    pub fn aabb(&self) -> Aabb {
-        self.0.aabb
-    }
-    pub fn upload(&self, context: &GpuContext) -> Result<DeviceScene> {
-        let mut uploads = self.0.uploads.lock().map_err(|e| e.to_string())?;
-        uploads.retain(|entry| entry.strong_count() > 0);
-        if let Some(scene) = uploads.iter().filter_map(Weak::upgrade).find(|scene| {
-            scene.context.instance == context.instance && scene.context.device == context.device
-        }) {
-            return Ok(DeviceScene(scene));
-        }
-        let mut meshes = Vec::new();
-        for mesh in &self.0.meshes {
-            let vertices: Vec<_> = mesh
-                .positions
+            let geometry = VertexGeometry(
+                positions
+                    .iter()
+                    .zip(normals)
+                    .enumerate()
+                    .map(|(i, (position, normal))| Vertex {
+                        position: position.to_array(),
+                        normal: normal.to_array(),
+                        uv: texcoords.as_ref().map_or([0.0; 2], |uv| uv[i]),
+                    })
+                    .collect(),
+            );
+            let topology = source
+                .indices
+                .as_chunks::<3>()
+                .0
                 .iter()
-                .zip(&mesh.normals)
-                .map(|(p, n)| Vertex {
-                    position: p.to_array(),
-                    normal: n.to_array(),
-                })
+                .map(|triangle| Triangle(triangle.map(VertexIndex)))
                 .collect();
-            let vertex = context
-                .device()
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("OBJ vertices"),
-                    contents: bytemuck::cast_slice(&vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            let index = context
-                .device()
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("OBJ indices"),
-                    contents: bytemuck::cast_slice(&mesh.indices),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
-            meshes.push(DeviceMesh {
-                vertex,
-                index,
-                count: mesh.indices.len() as u32,
+            meshes.push(TriangleMesh {
+                topology: TriangleTopology(topology),
+                geometry,
             });
         }
-        let scene = Arc::new(DeviceInner {
-            context: context.clone(),
-            meshes,
-            aabb: self.aabb(),
-        });
-        uploads.push(Arc::downgrade(&scene));
-        Ok(DeviceScene(scene))
+        Self::new(meshes)
     }
-}
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub(crate) struct Vertex {
-    pub position: [f32; 3],
-    pub normal: [f32; 3],
-}
-impl Vertex {
-    pub fn layout() -> wgpu::VertexBufferLayout<'static> {
-        const ATTRS: [wgpu::VertexAttribute; 2] =
-            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Self>() as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &ATTRS,
-        }
+    pub fn meshes(&self) -> &[TriangleMesh] {
+        &self.meshes
     }
-}
-
-#[derive(Clone)]
-pub struct DeviceScene(Arc<DeviceInner>);
-struct DeviceInner {
-    context: GpuContext,
-    meshes: Vec<DeviceMesh>,
-    aabb: Aabb,
-}
-struct DeviceMesh {
-    vertex: wgpu::Buffer,
-    index: wgpu::Buffer,
-    count: u32,
-}
-impl DeviceScene {
     pub fn aabb(&self) -> Aabb {
-        self.0.aabb
-    }
-    pub fn same_allocation(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-    pub(crate) fn compatible(&self, context: &GpuContext) -> bool {
-        self.0.context.instance == context.instance && self.0.context.device == context.device
-    }
-    pub(crate) fn meshes(&self) -> impl Iterator<Item = (&wgpu::Buffer, &wgpu::Buffer, u32)> {
-        self.0.meshes.iter().map(|m| (&m.vertex, &m.index, m.count))
+        Aabb::from_points(self.meshes.iter().flat_map(|mesh| {
+            mesh.geometry.iter().map(|vertex| {
+                let [x, y, z] = vertex.position();
+                Vec3::new(x, y, z)
+            })
+        }))
+        .expect("a loaded scene contains at least one vertex")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn obj_meshes_normals_bounds() {
+    fn obj_meshes_normals_and_scene_aabb() {
         let data = b"o first\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\no second\nv 0 0 1\nf 1 3 4\n";
-        let scene = HostScene::load_obj(data).unwrap();
+        let scene = Scene::load_obj(data).unwrap();
         assert_eq!(scene.meshes().len(), 2);
         assert_eq!(scene.aabb().max, Vec3::new(1.0, 1.0, 1.0));
-        assert_eq!(scene.meshes()[0].indices.len(), 3);
-        assert!(scene.meshes()[0].normals.iter().all(|n| n.length() > 0.9));
+        assert_eq!(scene.meshes()[0].topology.0.len(), 1);
+        assert!(
+            scene.meshes()[0]
+                .geometry
+                .iter()
+                .all(|vertex| Vec3::from_array(vertex.normal).length() > 0.9)
+        );
     }
+
+    #[test]
+    fn obj_loader_triangulates_polygon_faces() {
+        let scene = Scene::load_obj(b"v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n").unwrap();
+        assert_eq!(scene.meshes()[0].topology.0.len(), 2);
+    }
+
     #[test]
     fn bundled_models_triangulate_and_face_outward() {
         let pyramid =
-            HostScene::load_obj(include_bytes!("../../../assets/models/pyramid.obj")).unwrap();
-        let cube = HostScene::load_obj(include_bytes!("../../../assets/models/cube.obj")).unwrap();
-        assert_eq!(pyramid.meshes()[0].indices.len(), 18);
-        assert_eq!(cube.meshes()[0].indices.len(), 36);
+            Scene::load_obj(include_bytes!("../../../assets/models/pyramid.obj")).unwrap();
+        let cube = Scene::load_obj(include_bytes!("../../../assets/models/cube.obj")).unwrap();
+        assert_eq!(pyramid.meshes()[0].topology.0.len(), 6);
+        assert_eq!(cube.meshes()[0].topology.0.len(), 12);
         let mesh = &pyramid.meshes()[0];
         let front = mesh
-            .indices
-            .as_chunks::<3>()
+            .topology
             .0
             .iter()
-            .find(|face| {
-                let center = (mesh.positions[face[0] as usize]
-                    + mesh.positions[face[1] as usize]
-                    + mesh.positions[face[2] as usize])
+            .find(|triangle| {
+                let center = triangle
+                    .0
+                    .iter()
+                    .map(|index| Vec3::from_array(mesh.geometry.0[index.0 as usize].position))
+                    .sum::<Vec3>()
                     / 3.0;
                 center.z > 0.5 && center.y > -0.5
             })
             .unwrap();
-        let a = mesh.positions[front[0] as usize];
-        let b = mesh.positions[front[1] as usize];
-        let c = mesh.positions[front[2] as usize];
+        let [a, b, c] = front
+            .0
+            .map(|index| Vec3::from_array(mesh.geometry.0[index.0 as usize].position));
         assert!((b - a).cross(c - a).z > 0.0);
-    }
-    #[test]
-    fn obj_loader_triangulates_polygon_faces() {
-        let scene =
-            HostScene::load_obj(b"v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n").unwrap();
-        let mesh = &scene.meshes()[0];
-        assert_eq!(mesh.indices.len(), 6);
-        assert_eq!(mesh.indices.len() % 3, 0);
-    }
-    #[test]
-    fn gpu_upload_reuse_and_context_check() {
-        let Ok(first_context) = pollster::block_on(GpuContext::new()) else {
-            return;
-        };
-        let Ok(second_context) = pollster::block_on(GpuContext::new()) else {
-            return;
-        };
-        let scene = HostScene::load_obj(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
-        let first = scene.upload(&first_context).unwrap();
-        let reused = scene.upload(&first_context).unwrap();
-        assert!(first.same_allocation(&reused));
-        let second = scene.upload(&second_context).unwrap();
-        assert!(!first.same_allocation(&second));
-        let mut viewer = crate::ObjViewer::new(first_context);
-        assert!(viewer.set_device_scene(first).is_ok());
-        let mut other_viewer = crate::ObjViewer::new(viewer.context().clone());
-        other_viewer.set_device_scene(reused.clone()).unwrap();
-        assert!(
-            viewer
-                .scene()
-                .unwrap()
-                .same_allocation(other_viewer.scene().unwrap())
-        );
-        assert!(viewer.set_device_scene(second).is_err());
-        viewer.close();
-        assert!(!viewer.is_attached());
-        assert!(other_viewer.scene().is_some());
     }
 }

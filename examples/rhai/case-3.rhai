@@ -1,5 +1,5 @@
 let context = GpuContext();
-let scene = HostScene("assets/models/pyramid.obj");
+let scene = Scene("assets/models/pyramid.obj");
 let camera_a = Camera(); camera_a.frame(scene);
 let camera_b = Camera(); camera_b.frame(scene);
 let viewer_a = ObjViewer(context); viewer_a.set_scene(scene); viewer_a.set_title("Rhai case 3 A");

@@ -4,6 +4,7 @@
 // Arc to share native device resources across viewers and executor threads.
 #![cfg_attr(target_arch = "wasm32", allow(clippy::arc_with_non_send_sync))]
 mod camera;
+mod device_mesh;
 mod executor;
 mod gpu;
 mod input;
@@ -11,10 +12,14 @@ mod scene;
 mod viewer;
 
 pub use camera::Camera;
+pub use device_mesh::{DeviceTriangleMesh, GpuBuffer};
 pub use executor::{Executor, ExecutorError, Submitter, Task};
 pub use gpu::GpuContext;
 pub use input::{PointerButton, PointerInputState};
-pub use scene::{Aabb, DeviceScene, HostScene, TriangleMesh};
+pub use scene::{
+    Aabb, Scene, Triangle, TriangleMesh, TriangleTopology, Vertex, VertexGeometry, VertexIndex,
+    VertexLike,
+};
 pub use viewer::{ObjViewer, RenderStatus};
 
 pub type Result<T> = std::result::Result<T, String>;

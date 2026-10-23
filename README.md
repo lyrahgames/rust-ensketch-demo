@@ -13,7 +13,7 @@ This workspace renders indexed OBJ meshes with `wgpu` 30 on native windows and b
 | `apps/native` | One `winit` event loop, windows, input, REPL, optional Lua/Rhai runtimes |
 | `apps/web`, `examples/web` | Hybrid Cargo/pnpm Vite host, demo link page, canvas events, animation frames |
 
-`HostScene::load_obj(&bytes)` is the fundamental loader. Native adapters read files; browser bindings fetch URLs. It keeps indexed meshes, names, optional UVs, generated normals, and bounds. `HostScene::upload(&context)` creates a `DeviceScene`. A host scene caches only weak references to uploads by context identity: two viewers on one context reuse buffers, while unused device resources can be released. A device scene retains its creating context and is rejected by viewers on another context.
+`Scene::load_obj(&bytes)` is the fundamental CPU-only loader. It produces `TriangleMesh` values, each split into `TriangleTopology` (triples of strongly typed `VertexIndex`) and `VertexGeometry` (vertices with position, normal, and UV). Polygon faces are triangulated and missing normals are generated. `Scene` stores neither an AABB nor GPU resources; `scene.aabb()` computes its bounds when needed. GPU-side conversion is separate: `DeviceTriangleMesh::from_triangle_mesh(&context, &mesh)` produces typed vertex/element buffers. `ObjViewer` only consumes device triangle meshes.
 
 `Camera` is a cloneable value. Scripts own camera variables; `ObjViewer::render(&camera)` borrows one only for the frame. Projection uses right-handed, Y-up, zero-to-one depth and the viewer's current aspect ratio. The platform host attaches a surface after creating a window or canvas. The viewer stores no script callbacks.
 
@@ -106,7 +106,7 @@ Vite opens the existing `apps/web/index.html` link page, which points to the fou
 
 The first WebAssembly build may download the Rust `wasm32-unknown-unknown` target and the matching `wasm-bindgen` CLI through `wasm-pack`. Rust, Node.js 22.12 or newer, and pnpm 12.15 or newer are required. The `wasm-pack` install script is explicitly approved in `apps/web/pnpm-workspace.yaml` because pnpm otherwise blocks dependency install scripts by default.
 
-JavaScript owns browser event listeners, ordinary camera/viewer variables, and `requestAnimationFrame`. The WASM module exposes context, scene, device scene, camera, and canvas viewer classes. `HostScene.loadObjUrl` fetches the OBJ directly from static hosting. Call `.close()` on a viewer and generated `.free()` methods on WASM objects for deterministic cleanup; garbage collection is a fallback. The example host stops its frame loop, unregisters listeners, and frees all WASM objects on `pagehide`.
+JavaScript owns browser event listeners, ordinary camera/viewer variables, and `requestAnimationFrame`. The WASM module exposes context, scene, device triangle mesh, camera, and canvas viewer classes. `Scene.loadObjUrl` fetches the OBJ directly from static hosting. Call `.close()` on a viewer and generated `.free()` methods on WASM objects for deterministic cleanup; garbage collection is a fallback. The example host stops its frame loop, unregisters listeners, and frees all WASM objects on `pagehide`.
 
 ## Tasks, ownership, and lifecycle
 

@@ -1,10 +1,15 @@
 //! Persistent Lua bindings for script-owned engine objects.
-use engine::{Camera, DeviceScene, EventKind, GpuContext, HostScene, InputEvent, ObjViewer};
+#![recursion_limit = "1024"]
+use engine::{
+    Camera, DeviceTriangleMesh, EventKind, GpuContext, InputEvent, ObjViewer, Scene, Triangle,
+    Vertex,
+};
 use glam::{Quat, Vec3};
 use mlua::{AnyUserData, Function, Lua, Result, Table, UserData, UserDataFields, UserDataMethods};
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
+    sync::Arc,
 };
 
 fn err(message: String) -> mlua::Error {
@@ -23,18 +28,11 @@ impl UserData for LuaContext {
 }
 
 #[derive(Clone)]
-pub struct LuaHostScene(pub HostScene);
-impl UserData for LuaHostScene {
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("upload", |_, this, context: AnyUserData| {
-            let context = context.borrow::<LuaContext>()?;
-            Ok(LuaDeviceScene(this.0.upload(&context.0).map_err(err)?))
-        });
-    }
-}
+pub struct LuaScene(pub Scene);
+impl UserData for LuaScene {}
 #[derive(Clone)]
-pub struct LuaDeviceScene(pub DeviceScene);
-impl UserData for LuaDeviceScene {}
+pub struct LuaDeviceTriangleMesh(pub Arc<DeviceTriangleMesh<Vertex, Triangle>>);
+impl UserData for LuaDeviceTriangleMesh {}
 
 #[derive(Clone)]
 pub struct LuaCamera(pub Rc<RefCell<Camera>>);
@@ -104,7 +102,7 @@ impl UserData for LuaCamera {
         methods.add_method("frame", |_, this, scene: AnyUserData| {
             this.0
                 .borrow_mut()
-                .frame_aabb(scene.borrow::<LuaHostScene>()?.0.aabb());
+                .frame_aabb(scene.borrow::<LuaScene>()?.0.aabb());
             Ok(())
         });
         methods.add_method("reset", |_, this, ()| {
@@ -186,18 +184,24 @@ impl LuaViewer {
 impl UserData for LuaViewer {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("set_scene", |_, this, scene: AnyUserData| {
-            if let Ok(host) = scene.borrow::<LuaHostScene>() {
-                this.viewer
-                    .borrow_mut()
-                    .set_host_scene(&host.0)
-                    .map_err(err)
-            } else if let Ok(device) = scene.borrow::<LuaDeviceScene>() {
-                this.viewer
-                    .borrow_mut()
-                    .set_device_scene(device.0.clone())
-                    .map_err(err)
+            if let Ok(host) = scene.borrow::<LuaScene>() {
+                let context = this.viewer.borrow().context().clone();
+                let meshes = host
+                    .0
+                    .meshes()
+                    .iter()
+                    .map(|mesh| {
+                        DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new)
+                    })
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(err)?;
+                this.viewer.borrow_mut().set_device_meshes(meshes);
+                Ok(())
+            } else if let Ok(device) = scene.borrow::<LuaDeviceTriangleMesh>() {
+                this.viewer.borrow_mut().set_device_mesh(device.0.clone());
+                Ok(())
             } else {
-                Err(err("expected HostScene or DeviceScene".into()))
+                Err(err("expected Scene or DeviceTriangleMesh".into()))
             }
         });
         methods.add_method(
@@ -304,10 +308,32 @@ impl LuaRuntime {
             "load_obj",
             lua.create_function(|_, path: String| {
                 let data = std::fs::read(path).map_err(mlua::Error::external)?;
-                Ok(LuaHostScene(HostScene::load_obj(&data).map_err(err)?))
+                Ok(LuaScene(Scene::load_obj(&data).map_err(err)?))
             })?,
         )?;
-        globals.set("HostScene", scene_class)?;
+        globals.set("Scene", scene_class)?;
+        let device_mesh_class = lua.create_table()?;
+        device_mesh_class.set(
+            "from_scene",
+            lua.create_function(
+                |_, (context, scene, index): (AnyUserData, AnyUserData, usize)| {
+                    let context = context.borrow::<LuaContext>()?;
+                    let scene = scene.borrow::<LuaScene>()?;
+                    let index = index
+                        .checked_sub(1)
+                        .ok_or_else(|| err("triangle mesh indices start at 1".into()))?;
+                    let mesh = scene
+                        .0
+                        .meshes()
+                        .get(index)
+                        .ok_or_else(|| err("triangle mesh index is out of range".into()))?;
+                    Ok(LuaDeviceTriangleMesh(Arc::new(
+                        DeviceTriangleMesh::from_triangle_mesh(&context.0, mesh).map_err(err)?,
+                    )))
+                },
+            )?,
+        )?;
+        globals.set("DeviceTriangleMesh", device_mesh_class)?;
         let camera_class = lua.create_table()?;
         camera_class.set(
             "new",
@@ -369,8 +395,8 @@ impl LuaRuntime {
     pub fn expose_context(&self, name: &str, context: GpuContext) -> Result<()> {
         self.lua.globals().set(name, LuaContext(context))
     }
-    pub fn expose_host_scene(&self, name: &str, scene: HostScene) -> Result<()> {
-        self.lua.globals().set(name, LuaHostScene(scene))
+    pub fn expose_scene(&self, name: &str, scene: Scene) -> Result<()> {
+        self.lua.globals().set(name, LuaScene(scene))
     }
     pub fn viewers(&self) -> Vec<LuaViewer> {
         self.viewers

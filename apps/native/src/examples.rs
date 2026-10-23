@@ -1,7 +1,7 @@
 //! Runnable Rust examples built on the engine and native host APIs.
 use crate::{NativeApp, ViewerConfig};
-use engine::{Camera, GpuContext, HostScene, ObjViewer};
-use std::{cell::RefCell, rc::Rc};
+use engine::{Camera, DeviceTriangleMesh, GpuContext, ObjViewer, Scene};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 /// Run one of the four Rust parity demonstrations.
 pub fn run_case(case: usize) -> Result<(), String> {
@@ -9,18 +9,27 @@ pub fn run_case(case: usize) -> Result<(), String> {
         return Err("case must be 1..=4".into());
     }
     let context = pollster::block_on(GpuContext::new())?;
-    let first = HostScene::load_obj(include_bytes!("../../../assets/models/pyramid.obj"))?;
-    let second = HostScene::load_obj(include_bytes!("../../../assets/models/cube.obj"))?;
-    let shared_device = (case == 4).then(|| first.upload(&context)).transpose()?;
+    let first = Scene::load_obj(include_bytes!("../../../assets/models/pyramid.obj"))?;
+    let second = Scene::load_obj(include_bytes!("../../../assets/models/cube.obj"))?;
+    let first_meshes: Vec<_> = first
+        .meshes()
+        .iter()
+        .map(|mesh| DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new))
+        .collect::<engine::Result<_>>()?;
+    let second_meshes: Vec<_> = second
+        .meshes()
+        .iter()
+        .map(|mesh| DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new))
+        .collect::<engine::Result<_>>()?;
     let shared_camera = Rc::new(RefCell::new(Camera::from_aabb(first.aabb())));
     let mut app = NativeApp::new();
     let count = if case == 1 { 1 } else { 2 };
     for i in 0..count {
         let mut viewer = ObjViewer::new(context.clone());
         match case {
-            2 if i == 1 => viewer.set_host_scene(&second)?,
-            4 => viewer.set_device_scene(shared_device.as_ref().unwrap().clone())?,
-            _ => viewer.set_host_scene(&first)?,
+            2 if i == 1 => viewer.set_device_meshes(second_meshes.clone()),
+            4 => viewer.set_device_mesh(first_meshes[0].clone()),
+            _ => viewer.set_device_meshes(first_meshes.clone()),
         }
         let camera = if case == 4 || i == 0 {
             shared_camera.clone()

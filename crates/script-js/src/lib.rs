@@ -1,7 +1,8 @@
 //! Browser WebGPU bindings. JavaScript owns callbacks and animation frames.
 #![cfg(target_arch = "wasm32")]
-use engine::{Camera, DeviceScene, GpuContext, HostScene, ObjViewer};
+use engine::{Camera, DeviceTriangleMesh, GpuContext, ObjViewer, Scene, Triangle, Vertex};
 use glam::Vec3;
+use std::sync::Arc;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -33,20 +34,20 @@ impl JsGpuContext {
     }
 }
 
-#[wasm_bindgen(js_name = HostScene)]
-pub struct JsHostScene {
-    inner: HostScene,
+#[wasm_bindgen(js_name = Scene)]
+pub struct JsScene {
+    inner: Scene,
 }
-#[wasm_bindgen(js_class = HostScene)]
-impl JsHostScene {
+#[wasm_bindgen(js_class = Scene)]
+impl JsScene {
     #[wasm_bindgen(js_name = loadObj)]
-    pub fn load_obj(bytes: &[u8]) -> Result<JsHostScene, JsValue> {
+    pub fn load_obj(bytes: &[u8]) -> Result<JsScene, JsValue> {
         Ok(Self {
-            inner: HostScene::load_obj(bytes).map_err(error)?,
+            inner: Scene::load_obj(bytes).map_err(error)?,
         })
     }
     #[wasm_bindgen(js_name = loadObjUrl)]
-    pub async fn load_obj_url(url: String) -> Result<JsHostScene, JsValue> {
+    pub async fn load_obj_url(url: String) -> Result<JsScene, JsValue> {
         let window = web_sys::window().ok_or_else(|| error("no browser window".into()))?;
         let request = Request::new_with_str(&url)?;
         let response = JsFuture::from(window.fetch_with_request(&request)).await?;
@@ -61,17 +62,31 @@ impl JsHostScene {
         let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
         Self::load_obj(&bytes)
     }
-    #[wasm_bindgen(js_name = upload)]
-    pub fn upload(&self, context: &JsGpuContext) -> Result<JsDeviceScene, JsValue> {
-        Ok(JsDeviceScene {
-            inner: self.inner.upload(&context.inner).map_err(error)?,
-        })
-    }
 }
 
-#[wasm_bindgen(js_name = DeviceScene)]
-pub struct JsDeviceScene {
-    inner: DeviceScene,
+#[wasm_bindgen(js_name = DeviceTriangleMesh)]
+pub struct JsDeviceTriangleMesh {
+    inner: Arc<DeviceTriangleMesh<Vertex, Triangle>>,
+}
+#[wasm_bindgen(js_class = DeviceTriangleMesh)]
+impl JsDeviceTriangleMesh {
+    #[wasm_bindgen(js_name = fromScene)]
+    pub fn from_scene(
+        context: &JsGpuContext,
+        scene: &JsScene,
+        mesh_index: usize,
+    ) -> Result<JsDeviceTriangleMesh, JsValue> {
+        let mesh = scene
+            .inner
+            .meshes()
+            .get(mesh_index)
+            .ok_or_else(|| error("triangle mesh index is out of range".into()))?;
+        Ok(Self {
+            inner: Arc::new(
+                DeviceTriangleMesh::from_triangle_mesh(&context.inner, mesh).map_err(error)?,
+            ),
+        })
+    }
 }
 
 #[wasm_bindgen(js_name = Camera)]
@@ -86,7 +101,7 @@ impl JsCamera {
             inner: Camera::default(),
         }
     }
-    pub fn frame(&mut self, scene: &JsHostScene) {
+    pub fn frame(&mut self, scene: &JsScene) {
         self.inner.frame_aabb(scene.inner.aabb());
     }
     pub fn orbit(&mut self, dx: f32, dy: f32) {
@@ -149,15 +164,23 @@ impl JsObjViewer {
             background: [0.08, 0.09, 0.12, 1.0],
         })
     }
-    #[wasm_bindgen(js_name = setHostScene)]
-    pub fn set_host_scene(&mut self, scene: &JsHostScene) -> Result<(), JsValue> {
-        self.inner.set_host_scene(&scene.inner).map_err(error)
+    #[wasm_bindgen(js_name = setScene)]
+    pub fn set_scene(&mut self, scene: &JsScene) -> Result<(), JsValue> {
+        let meshes = scene
+            .inner
+            .meshes()
+            .iter()
+            .map(|mesh| {
+                DeviceTriangleMesh::from_triangle_mesh(self.inner.context(), mesh).map(Arc::new)
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(error)?;
+        self.inner.set_device_meshes(meshes);
+        Ok(())
     }
-    #[wasm_bindgen(js_name = setDeviceScene)]
-    pub fn set_device_scene(&mut self, scene: &JsDeviceScene) -> Result<(), JsValue> {
-        self.inner
-            .set_device_scene(scene.inner.clone())
-            .map_err(error)
+    #[wasm_bindgen(js_name = setDeviceMesh)]
+    pub fn set_device_mesh(&mut self, mesh: &JsDeviceTriangleMesh) {
+        self.inner.set_device_mesh(mesh.inner.clone());
     }
     #[wasm_bindgen(js_name = setBackgroundColor)]
     pub fn set_background_color(&mut self, r: f32, g: f32, b: f32, a: f32) {

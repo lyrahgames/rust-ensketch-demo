@@ -1,5 +1,6 @@
-use crate::{Camera, DeviceScene, GpuContext, HostScene, Result, scene::Vertex};
+use crate::{Camera, DeviceTriangleMesh, GpuContext, Result, Triangle, Vertex};
 use bytemuck::{Pod, Zeroable};
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -21,7 +22,7 @@ struct SurfaceState {
 pub struct ObjViewer {
     context: GpuContext,
     surface: Option<SurfaceState>,
-    scene: Option<DeviceScene>,
+    meshes: Vec<Arc<DeviceTriangleMesh<Vertex, Triangle>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,7 +38,7 @@ impl ObjViewer {
         Self {
             context,
             surface: None,
-            scene: None,
+            meshes: Vec::new(),
         }
     }
     pub fn attach_surface(
@@ -190,26 +191,22 @@ impl ObjViewer {
         state.depth = Self::create_depth(&self.context, &config);
         Ok(())
     }
-    pub fn set_host_scene(&mut self, scene: &HostScene) -> Result<()> {
-        self.scene = Some(scene.upload(&self.context)?);
-        Ok(())
+    pub fn set_device_mesh(&mut self, mesh: Arc<DeviceTriangleMesh<Vertex, Triangle>>) {
+        self.meshes.clear();
+        self.meshes.push(mesh);
     }
-    pub fn set_device_scene(&mut self, scene: DeviceScene) -> Result<()> {
-        if !scene.compatible(&self.context) {
-            return Err("device scene belongs to a different GPU context".into());
-        }
-        self.scene = Some(scene);
-        Ok(())
+    pub fn set_device_meshes(&mut self, meshes: Vec<Arc<DeviceTriangleMesh<Vertex, Triangle>>>) {
+        self.meshes = meshes;
     }
-    pub fn scene(&self) -> Option<&DeviceScene> {
-        self.scene.as_ref()
+    pub fn mesh_count(&self) -> usize {
+        self.meshes.len()
     }
     pub fn is_attached(&self) -> bool {
         self.surface.is_some()
     }
     pub fn close(&mut self) {
         self.surface = None;
-        self.scene = None;
+        self.meshes.clear();
     }
     pub fn render(&mut self, camera: &Camera, background: [f32; 4]) -> Result<RenderStatus> {
         if !camera.is_valid() {
@@ -288,12 +285,13 @@ impl ObjViewer {
             });
             pass.set_pipeline(&state.pipeline);
             pass.set_bind_group(0, &state.bind_group, &[]);
-            if let Some(scene) = &self.scene {
-                for (vertex, index, count) in scene.meshes() {
-                    pass.set_vertex_buffer(0, vertex.slice(..));
-                    pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..count, 0, 0..1);
-                }
+            for mesh in &self.meshes {
+                pass.set_vertex_buffer(0, mesh.vertex_buffer().buffer().slice(..));
+                pass.set_index_buffer(
+                    mesh.element_buffer().buffer().slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                pass.draw_indexed(0..mesh.element_count() * 3, 0, 0..1);
             }
         }
         self.context.queue().submit(Some(encoder.finish()));

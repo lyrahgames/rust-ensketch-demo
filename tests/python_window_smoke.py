@@ -2,7 +2,7 @@
 import graphics as gfx
 
 context = gfx.GpuContext()
-scene = gfx.HostScene.from_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+scene = gfx.Scene.from_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
 camera = gfx.Camera()
 camera.frame(scene)
 viewer_a = gfx.ObjViewer(context)

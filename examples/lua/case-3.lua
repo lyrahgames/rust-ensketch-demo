@@ -1,5 +1,5 @@
 context = GpuContext.new()
-scene = HostScene.load_obj("assets/models/pyramid.obj")
+scene = Scene.load_obj("assets/models/pyramid.obj")
 camera_a = Camera.new(); camera_a:frame(scene)
 camera_b = Camera.new(); camera_b:frame(scene)
 viewer_a = ObjViewer.new(context); viewer_a:set_scene(scene); viewer_a:set_title("Lua case 3 A")

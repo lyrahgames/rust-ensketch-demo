@@ -1,6 +1,6 @@
 //! One winit loop, one main-thread viewer, and one worker-owned viewer.
 #![recursion_limit = "512"]
-use engine::{Camera, Executor, GpuContext, HostScene, ObjViewer, RenderStatus};
+use engine::{Camera, Executor, GpuContext, ObjViewer, RenderStatus, Scene};
 use script_lua::LuaRuntime;
 use script_rhai::RhaiRuntime;
 use std::{
@@ -85,7 +85,7 @@ impl WorkerState {
 
 struct ThreadedApp {
     context: GpuContext,
-    scene: HostScene,
+    scene: Scene,
     camera: Rc<RefCell<Camera>>,
     main_window: Option<Arc<Window>>,
     worker_window: Option<Arc<Window>>,
@@ -153,7 +153,16 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
             .create_surface(worker_window.clone())
             .unwrap();
         let mut main_viewer = ObjViewer::new(self.context.clone());
-        main_viewer.set_host_scene(&self.scene).unwrap();
+        let meshes = self
+            .scene
+            .meshes()
+            .iter()
+            .map(|mesh| {
+                engine::DeviceTriangleMesh::from_triangle_mesh(&self.context, mesh).map(Arc::new)
+            })
+            .collect::<engine::Result<Vec<_>>>()
+            .unwrap();
+        main_viewer.set_device_meshes(meshes);
         main_viewer.attach_surface(main_surface, 640, 480).unwrap();
         let main_viewer = Rc::new(RefCell::new(main_viewer));
         let main_lua = LuaRuntime::new().unwrap();
@@ -166,14 +175,12 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
         main_lua
             .expose_context("context", self.context.clone())
             .unwrap();
-        main_lua
-            .expose_host_scene("scene", self.scene.clone())
-            .unwrap();
+        main_lua.expose_scene("scene", self.scene.clone()).unwrap();
         let mut main_rhai = RhaiRuntime::new();
         main_rhai.expose_viewer("viewer", main_viewer.clone());
         main_rhai.expose_camera("camera", self.camera.clone());
         main_rhai.expose_context("context", self.context.clone());
-        main_rhai.expose_host_scene("scene", self.scene.clone());
+        main_rhai.expose_scene("scene", self.scene.clone());
         self.main_viewer = Some(main_viewer);
         self.main_lua = Some(main_lua);
         self.main_rhai = Some(main_rhai);
@@ -185,7 +192,15 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
         let proxy = self.proxy.clone();
         let worker = Executor::new_worker_with(move || {
             let mut viewer = ObjViewer::new(context.clone());
-            viewer.set_host_scene(&scene).unwrap();
+            let meshes = scene
+                .meshes()
+                .iter()
+                .map(|mesh| {
+                    engine::DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new)
+                })
+                .collect::<engine::Result<Vec<_>>>()
+                .unwrap();
+            viewer.set_device_meshes(meshes);
             viewer.attach_surface(worker_surface, 800, 400).unwrap();
             let viewer = Rc::new(RefCell::new(viewer));
             let mut camera = Camera::default();
@@ -195,12 +210,12 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
             lua.expose_viewer("viewer", viewer.clone()).unwrap();
             lua.expose_camera("camera", camera.clone()).unwrap();
             lua.expose_context("context", context.clone()).unwrap();
-            lua.expose_host_scene("scene", scene.clone()).unwrap();
+            lua.expose_scene("scene", scene.clone()).unwrap();
             let mut rhai = RhaiRuntime::new();
             rhai.expose_viewer("viewer", viewer.clone());
             rhai.expose_camera("camera", camera.clone());
             rhai.expose_context("context", context);
-            rhai.expose_host_scene("scene", scene);
+            rhai.expose_scene("scene", scene);
             let _ = proxy.send_event(Box::new(|app, _| {
                 if let Some(window) = &app.main_window {
                     window.set_title("Main viewer — title changed by worker closure");
@@ -412,7 +427,7 @@ impl ApplicationHandler<MainTask> for ThreadedApp {
 
 fn main() {
     let context = pollster::block_on(GpuContext::new()).unwrap();
-    let scene = HostScene::load_obj(include_bytes!("../../../assets/models/pyramid.obj")).unwrap();
+    let scene = Scene::load_obj(include_bytes!("../../../assets/models/pyramid.obj")).unwrap();
     let mut camera = Camera::default();
     camera.frame_aabb(scene.aabb());
     let event_loop = EventLoop::<MainTask>::with_user_event().build().unwrap();

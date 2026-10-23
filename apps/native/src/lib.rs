@@ -46,11 +46,7 @@ pub struct ViewerConfig {
 }
 impl ViewerConfig {
     pub fn new(viewer: Rc<RefCell<ObjViewer>>, camera: Rc<RefCell<Camera>>) -> Self {
-        let pivot = viewer
-            .borrow()
-            .scene()
-            .map(|scene| scene.aabb().center())
-            .unwrap_or(glam::Vec3::ZERO);
+        let pivot = glam::Vec3::ZERO;
         let controlled_camera = camera.clone();
         Self {
             viewer,

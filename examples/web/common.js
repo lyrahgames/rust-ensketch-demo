@@ -1,4 +1,4 @@
-import init, { GpuContext, HostScene, Camera, ObjViewer } from '../../pkg/script_js.js';
+import init, { GpuContext, Scene, DeviceTriangleMesh, Camera, ObjViewer } from '../../pkg/script_js.js';
 
 export function pointerEvent(event, dx = 0, dy = 0) {
   return {
@@ -32,11 +32,11 @@ export function closeRequestEvent() {
 export async function run(caseNumber) {
   await init();
   const context = await GpuContext.create();
-  const pyramid = await HostScene.loadObjUrl(new URL('../../assets/models/pyramid.obj', import.meta.url).href);
+  const pyramid = await Scene.loadObjUrl(new URL('../../assets/models/pyramid.obj', import.meta.url).href);
   const cube = caseNumber === 2
-    ? await HostScene.loadObjUrl(new URL('../../assets/models/cube.obj', import.meta.url).href)
+    ? await Scene.loadObjUrl(new URL('../../assets/models/cube.obj', import.meta.url).href)
     : null;
-  const deviceScene = caseNumber === 4 ? pyramid.upload(context) : null;
+  const deviceMesh = caseNumber === 4 ? DeviceTriangleMesh.fromScene(context, pyramid, 0) : null;
   const canvases = [...document.querySelectorAll('canvas')];
   const listeners = new AbortController();
   const sharedCamera = new Camera();
@@ -46,8 +46,8 @@ export async function run(caseNumber) {
     canvas.style.height = 'auto';
     const viewer = new ObjViewer(context, canvas);
     const scene = caseNumber === 2 && index === 1 ? cube : pyramid;
-    if (deviceScene) viewer.setDeviceScene(deviceScene);
-    else viewer.setHostScene(scene);
+    if (deviceMesh) viewer.setDeviceMesh(deviceMesh);
+    else viewer.setScene(scene);
     viewer.setBackgroundColor(...(index === 0 ? [0.08, 0.09, 0.12, 1] : [0.17, 0.08, 0.12, 1]));
     const camera = caseNumber === 4 || index === 0 ? sharedCamera : new Camera();
     if (camera !== sharedCamera) camera.frame(scene);

@@ -1,5 +1,9 @@
 //! Importable Python host. Python owns all wrapper objects and callbacks.
-use engine::{Camera, DeviceScene, EventKind, GpuContext, HostScene, InputEvent, ObjViewer};
+#![recursion_limit = "1024"]
+use engine::{
+    Camera, DeviceTriangleMesh, EventKind, GpuContext, InputEvent, ObjViewer, Scene, Triangle,
+    Vertex,
+};
 use glam::{Quat, Vec3};
 use native::{NativeApp, NativeSession, ViewerConfig};
 use pyo3::{
@@ -9,6 +13,7 @@ use pyo3::{
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
+    sync::Arc,
     time::Duration,
 };
 
@@ -39,28 +44,23 @@ impl PyGpuContext {
     }
 }
 
-#[pyclass(name = "HostScene", unsendable)]
-struct PyHostScene {
-    inner: HostScene,
+#[pyclass(name = "Scene", unsendable)]
+struct PyScene {
+    inner: Scene,
 }
 #[pymethods]
-impl PyHostScene {
+impl PyScene {
     #[staticmethod]
     fn load_obj(path: &str) -> PyResult<Self> {
         let bytes = std::fs::read(path).map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self {
-            inner: HostScene::load_obj(&bytes).map_err(error)?,
+            inner: Scene::load_obj(&bytes).map_err(error)?,
         })
     }
     #[staticmethod]
     fn from_bytes(bytes: &[u8]) -> PyResult<Self> {
         Ok(Self {
-            inner: HostScene::load_obj(bytes).map_err(error)?,
-        })
-    }
-    fn upload(&self, context: PyRef<'_, PyGpuContext>) -> PyResult<PyDeviceScene> {
-        Ok(PyDeviceScene {
-            inner: self.inner.upload(&context.inner).map_err(error)?,
+            inner: Scene::load_obj(bytes).map_err(error)?,
         })
     }
     #[getter]
@@ -69,9 +69,29 @@ impl PyHostScene {
     }
 }
 
-#[pyclass(name = "DeviceScene", unsendable)]
-struct PyDeviceScene {
-    inner: DeviceScene,
+#[pyclass(name = "DeviceTriangleMesh", unsendable)]
+struct PyDeviceTriangleMesh {
+    inner: Arc<DeviceTriangleMesh<Vertex, Triangle>>,
+}
+#[pymethods]
+impl PyDeviceTriangleMesh {
+    #[staticmethod]
+    fn from_scene(
+        context: PyRef<'_, PyGpuContext>,
+        scene: PyRef<'_, PyScene>,
+        mesh_index: usize,
+    ) -> PyResult<Self> {
+        let mesh = scene
+            .inner
+            .meshes()
+            .get(mesh_index)
+            .ok_or_else(|| PyValueError::new_err("triangle mesh index is out of range"))?;
+        Ok(Self {
+            inner: Arc::new(
+                DeviceTriangleMesh::from_triangle_mesh(&context.inner, mesh).map_err(error)?,
+            ),
+        })
+    }
 }
 
 #[pyclass(name = "Camera", unsendable)]
@@ -141,7 +161,7 @@ impl PyCamera {
     fn reset(&self) {
         self.inner.borrow_mut().reset();
     }
-    fn frame(&self, scene: PyRef<'_, PyHostScene>) {
+    fn frame(&self, scene: PyRef<'_, PyScene>) {
         self.inner.borrow_mut().frame_aabb(scene.inner.aabb());
     }
 }
@@ -274,28 +294,34 @@ impl PyObjViewer {
         Self { registration }
     }
     fn set_scene(&self, scene: &Bound<'_, PyAny>) -> PyResult<()> {
-        if let Ok(host) = scene.extract::<PyRef<'_, PyHostScene>>() {
+        if let Ok(host) = scene.extract::<PyRef<'_, PyScene>>() {
             self.registration
                 .camera
                 .borrow_mut()
                 .frame_aabb(host.inner.aabb());
+            let context = self.registration.viewer.borrow().context().clone();
+            let meshes = host
+                .inner
+                .meshes()
+                .iter()
+                .map(|mesh| DeviceTriangleMesh::from_triangle_mesh(&context, mesh).map(Arc::new))
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(error)?;
             self.registration
                 .viewer
                 .borrow_mut()
-                .set_host_scene(&host.inner)
-                .map_err(error)
-        } else if let Ok(device) = scene.extract::<PyRef<'_, PyDeviceScene>>() {
-            self.registration
-                .camera
-                .borrow_mut()
-                .frame_aabb(device.inner.aabb());
+                .set_device_meshes(meshes);
+            Ok(())
+        } else if let Ok(device) = scene.extract::<PyRef<'_, PyDeviceTriangleMesh>>() {
             self.registration
                 .viewer
                 .borrow_mut()
-                .set_device_scene(device.inner.clone())
-                .map_err(error)
+                .set_device_mesh(device.inner.clone());
+            Ok(())
         } else {
-            Err(PyValueError::new_err("expected HostScene or DeviceScene"))
+            Err(PyValueError::new_err(
+                "expected Scene or DeviceTriangleMesh",
+            ))
         }
     }
     fn set_background_color(&self, r: f32, g: f32, b: f32, a: f32) {
@@ -550,8 +576,8 @@ fn process_events(py: Python<'_>, timeout_ms: u64) -> PyResult<bool> {
 #[pymodule]
 fn graphics(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyGpuContext>()?;
-    module.add_class::<PyHostScene>()?;
-    module.add_class::<PyDeviceScene>()?;
+    module.add_class::<PyScene>()?;
+    module.add_class::<PyDeviceTriangleMesh>()?;
     module.add_class::<PyCamera>()?;
     module.add_class::<PyInputEvent>()?;
     module.add_class::<PyObjViewer>()?;

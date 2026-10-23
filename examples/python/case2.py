@@ -2,8 +2,8 @@ import graphics as gfx
 from common import MODELS, make_viewer
 
 context = gfx.GpuContext()
-scene_a = gfx.HostScene.load_obj(str(MODELS / "pyramid.obj"))
-scene_b = gfx.HostScene.load_obj(str(MODELS / "cube.obj"))
+scene_a = gfx.Scene.load_obj(str(MODELS / "pyramid.obj"))
+scene_b = gfx.Scene.load_obj(str(MODELS / "cube.obj"))
 camera_a = gfx.Camera(); camera_a.frame(scene_a)
 camera_b = gfx.Camera(); camera_b.frame(scene_b)
 viewer_a = make_viewer(context, scene_a, camera_a, "Python case 2 A")
