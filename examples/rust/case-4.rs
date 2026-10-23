@@ -1,3 +1,1 @@
-fn main() {
-    native::run_case(4).unwrap();
-}
+fn main() { native::run_case(4).unwrap(); }
